@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String    @id @default(uuid())
+  telegramId       BigInt?   @unique
+  inviteToken      String?   @unique // Для привязки TG
+  name             String
+  roleId           String?
+  role             Role?     @relation(fields: [roleId], references: [id])
+  timezone         String    @default("Europe/Moscow")
+  workStart        String    @default("10:00") // HH:mm
+  workEnd          String    @default("19:00") // HH:mm
+  workDays         Int[]     @default([1, 2, 3, 4, 5]) // 1-ПН, 7-ВС
+  isActive         Boolean   @default(true)
+  isAdmin          Boolean   @default(false)
+  passwordHash     String?   // Для входа в веб-админку
+  
+  // Tracking
+  lastMorningCheck DateTime?
+  lastEveningCheck DateTime?
+
+  projects         Project[]
+  tasks            Task[]
+  checkIns         CheckIn[]
+  customQuestions  Question[] @relation("UserCustomQuestions")
+}
+
+model Role {
+  id        String     @id @default(uuid())
+  name      String     @unique // developer, sales, etc.
+  users     User[]
+  questions Question[] @relation("RoleQuestions")
+}
+
+model Project {
+  id       String  @id @default(uuid())
+  name     String
+  isActive Boolean @default(true)
+  users    User[]
+  tasks    Task[]
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  BLOCKED
+}
+
+model Task {
+  id         String     @id @default(uuid())
+  title      String
+  projectId  String
+  project    Project    @relation(fields: [projectId], references: [id])
+  assigneeId String?
+  assignee   User?      @relation(fields: [assigneeId], references: [id])
+  status     TaskStatus @default(TODO)
+  deadline   DateTime?
+}
+
+enum QuestionType {
+  TEXT
+  NUMBER
+  TIME
+  YES_NO
+  SELECT
+}
+
+enum CheckInTime {
+  MORNING
+  EVENING
+  BOTH
+}
+
+model Question {
+  id            String       @id @default(uuid())
+  text          String
+  type          QuestionType
+  options       String[]     // Для типа SELECT
+  checkInTime   CheckInTime
+  isRequired    Boolean      @default(true)
+  
+  targetRoleId  String?
+  targetRole    Role?        @relation("RoleQuestions", fields: [targetRoleId], references: [id])
+  targetUserId  String?
+  targetUser    User?        @relation("UserCustomQuestions", fields: [targetUserId], references: [id])
+  
+  answers       Answer[]
+}
+
+model CheckIn {
+  id        String      @id @default(uuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id])
+  type      CheckInTime // MORNING / EVENING
+  createdAt DateTime    @default(now())
+  answers   Answer[]
+}
+
+model Answer {
+  id         String   @id @default(uuid())
+  checkInId  String
+  checkIn    CheckIn  @relation(fields: [checkInId], references: [id])
+  questionId String?  
+  question   Question? @relation(fields: [questionId], references: [id])
+  value      String   // Храним ответ как строку (для YES_NO - "yes"/"no", для массива - JSON.stringify)
+}
