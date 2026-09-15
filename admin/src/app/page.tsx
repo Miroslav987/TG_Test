@@ -1,8 +1,9 @@
 import { prisma } from "@standup/shared";
-import { createUser } from "../../actions/users";
+import { createUser } from "../actions/users";
+import EditSchedule from "../components/EditSchedule";
 
 export default async function UsersPage() {
-  const users = await prisma.user.findMany({ include: { role: true } });
+  const users = await prisma.user.findMany({ include: { role: true }, orderBy: { name: 'asc' } });
   const roles = await prisma.role.findMany();
 
   return (
@@ -11,12 +12,7 @@ export default async function UsersPage() {
       
       <form action={createUser} className="mb-8 p-6 bg-white rounded-lg shadow-sm border border-gray-100 max-w-md">
         <h3 className="text-lg font-medium mb-4">Добавить сотрудника</h3>
-        <input 
-          name="name" 
-          placeholder="Имя сотрудника" 
-          required 
-          className="w-full mb-3 p-2 border border-gray-300 rounded focus:outline-blue-500"
-        />
+        <input name="name" placeholder="Имя сотрудника" required className="w-full mb-3 p-2 border border-gray-300 rounded focus:outline-blue-500" />
         <select name="roleId" className="w-full mb-4 p-2 border border-gray-300 rounded focus:outline-blue-500">
           <option value="">-- Без роли --</option>
           {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
@@ -34,6 +30,9 @@ export default async function UsersPage() {
               <span className="bg-gray-100 px-2 py-1 rounded text-xs mr-2">{user.role?.name || "Нет роли"}</span>
               Таймзона: {user.timezone} | {user.workStart}-{user.workEnd}
             </div>
+            
+            {/* Клиентский компонент для редактирования */}
+            <EditSchedule user={user} />
             
             {user.inviteToken && (
               <div className="mt-4 bg-blue-50 border border-blue-100 text-blue-800 p-3 rounded text-sm">
