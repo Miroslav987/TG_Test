@@ -58,7 +58,7 @@ export default function EditSchedule({ user }: { user: any }) {
           ))}
         </div>
       </div>
-
+  
       <div className="flex gap-2">
         <button type="submit" className="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700">Сохранить</button>
         <button type="button" onClick={() => setIsOpen(false)} className="bg-gray-200 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-300">Отмена</button>
