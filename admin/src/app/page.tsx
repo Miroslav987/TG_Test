@@ -60,7 +60,7 @@ export default async function UsersPage() {
         {user.inviteToken && (
           <div className="mt-4 bg-blue-50 border border-blue-100 text-blue-800 p-3 rounded text-sm">
             ⏳ Ожидает привязки Telegram.<br/>
-            Отправь ссылку: <b className="select-all">t.me/ТВОЙ_БОТ_NAME?start={user.inviteToken}</b>
+            Отправь ссылку: <b className="select-all">t.me/espada_it_solutions_bot?start={user.inviteToken}</b>
           </div>
         )}
         

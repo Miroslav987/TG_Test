@@ -3,7 +3,7 @@ import { prisma } from "./index";
 
 export async function generateProjectReport(projectId: string) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -77,7 +77,7 @@ export async function generateProjectReport(projectId: string) {
 
 export async function generateEmployeeReport(userId: string, period: "today" | "week") {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
