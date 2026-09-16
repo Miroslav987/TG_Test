@@ -54,3 +54,9 @@ export async function toggleUserStatus(formData: FormData) {
   });
   revalidatePath("/");
 }
+
+export async function deleteUser(formData: FormData) {
+  const id = formData.get("userId") as string;
+  await prisma.user.delete({ where: { id } });
+  revalidatePath("/");
+}

@@ -37,3 +37,16 @@ export async function createTask(formData: FormData) {
   });
   revalidatePath("/projects");
 }
+
+export async function toggleProjectStatus(formData: FormData) {
+  const id = formData.get("projectId") as string;
+  const isActive = formData.get("isActive") === "true";
+  await prisma.project.update({ where: { id }, data: { isActive: !isActive } });
+  revalidatePath("/projects");
+}
+
+export async function deleteProject(formData: FormData) {
+  const id = formData.get("projectId") as string;
+  await prisma.project.delete({ where: { id } });
+  revalidatePath("/projects");
+}

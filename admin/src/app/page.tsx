@@ -1,59 +1,81 @@
 import { prisma } from "@standup/shared";
-import { createUser, toggleUserStatus } from "../actions/users";
+import { createUser, toggleUserStatus, deleteUser } from "../actions/users";
 import EditUser from "../components/EditUser";
 
 export default async function UsersPage() {
-  // Меняем role на roles
-  const users = await prisma.user.findMany({ include: { roles: true }, orderBy: { name: 'asc' } });
+  // ДОБАВЛЕНО: _count для проверок истории
+  const users = await prisma.user.findMany({ 
+    include: { 
+      roles: true, 
+      _count: { select: { checkIns: true, tasks: true } } 
+    }, 
+    orderBy: { name: 'asc' } 
+  });
   const roles = await prisma.role.findMany({ orderBy: { name: 'asc' } });
 
   const activeUsers = users.filter(u => u.isActive);
   const inactiveUsers = users.filter(u => !u.isActive);
 
-  const UserCard = ({ user, isActive }: { user: any, isActive: boolean }) => (
-    <div className={`border border-gray-200 bg-white p-5 rounded-lg shadow-sm ${!isActive ? 'opacity-60 grayscale' : ''}`}>
-      <div className="flex justify-between items-start">
-        <strong className="text-lg block">{user.name}</strong>
-        {!isActive && <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">Неактивен</span>}
-      </div>
-      <div className="text-sm text-gray-500 mt-2 mb-2">
-        <div className="flex flex-wrap gap-1 mb-2">
-          {user.roles.length > 0 ? (
-            user.roles.map((r: any) => (
-              <span key={r.id} className="bg-gray-100 px-2 py-1 rounded text-xs">{r.name}</span>
-            ))
-          ) : (
-            <span className="bg-gray-100 px-2 py-1 rounded text-xs">Нет роли</span>
+  const UserCard = ({ user, isActive }: { user: any, isActive: boolean }) => {
+    // Проверка: можно удалить, только если нет чекинов и тасок
+    const canDelete = user._count.checkIns === 0 && user._count.tasks === 0;
+
+    return (
+      <div className={`border border-gray-200 bg-white p-5 rounded-lg shadow-sm ${!isActive ? 'opacity-60 grayscale' : ''}`}>
+        <div className="flex justify-between items-start">
+          <strong className="text-lg block">{user.name}</strong>
+          {!isActive && <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">Неактивен</span>}
+        </div>
+        <div className="text-sm text-gray-500 mt-2 mb-2">
+          <div className="flex flex-wrap gap-1 mb-2">
+            {user.roles.length > 0 ? (
+              user.roles.map((r: any) => (
+                <span key={r.id} className="bg-gray-100 px-2 py-1 rounded text-xs">{r.name}</span>
+              ))
+            ) : (
+              <span className="bg-gray-100 px-2 py-1 rounded text-xs">Нет роли</span>
+            )}
+          </div>
+          Таймзона: {user.timezone} | {user.workStart}-{user.workEnd}
+        </div>
+        
+        <div className="flex gap-4 items-center mt-2 border-t pt-2">
+          <EditUser user={user} roles={roles} />
+          
+          <form action={toggleUserStatus} className="inline mt-2">
+            <input type="hidden" name="userId" value={user.id} />
+            <input type="hidden" name="isActive" value={String(user.isActive)} />
+            <button type="submit" className="text-xs text-orange-600 hover:underline">
+              {isActive ? "🚫 Деактивировать" : "✅ Активировать"}
+            </button>
+          </form>
+
+          {/* НОВАЯ КНОПКА УДАЛЕНИЯ */}
+          {canDelete && (
+            <form action={deleteUser} className="inline mt-2" onSubmit={(e) => !confirm(`Точно удалить сотрудника "${user.name}"?`) && e.preventDefault()}>
+              <input type="hidden" name="userId" value={user.id} />
+              <button type="submit" className="text-xs text-red-600 hover:underline">
+                🗑 Удалить
+              </button>
+            </form>
           )}
         </div>
-        Таймзона: {user.timezone} | {user.workStart}-{user.workEnd}
+        
+        {user.inviteToken && (
+          <div className="mt-4 bg-blue-50 border border-blue-100 text-blue-800 p-3 rounded text-sm">
+            ⏳ Ожидает привязки Telegram.<br/>
+            Отправь ссылку: <b className="select-all">t.me/ТВОЙ_БОТ_NAME?start={user.inviteToken}</b>
+          </div>
+        )}
+        
+        {user.telegramId && isActive && (
+          <div className="mt-4 text-green-600 font-medium text-sm flex items-center gap-1">
+            ✅ Telegram привязан
+          </div>
+        )}
       </div>
-      
-      <div className="flex gap-4 items-center mt-2 border-t pt-2">
-        <EditUser user={user} roles={roles} />
-        <form action={toggleUserStatus} className="inline mt-2">
-          <input type="hidden" name="userId" value={user.id} />
-          <input type="hidden" name="isActive" value={String(user.isActive)} />
-          <button type="submit" className="text-xs text-red-600 hover:underline">
-            {isActive ? "🚫 Деактивировать" : "✅ Активировать"}
-          </button>
-        </form>
-      </div>
-      
-      {user.inviteToken && (
-        <div className="mt-4 bg-blue-50 border border-blue-100 text-blue-800 p-3 rounded text-sm">
-          ⏳ Ожидает привязки Telegram.<br/>
-          Отправь ссылку: <b className="select-all">t.me/ТВОЙ_БОТ_NAME?start={user.inviteToken}</b>
-        </div>
-      )}
-      
-      {user.telegramId && isActive && (
-        <div className="mt-4 text-green-600 font-medium text-sm flex items-center gap-1">
-          ✅ Telegram привязан
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   return (
     <div>

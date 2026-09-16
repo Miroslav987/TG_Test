@@ -1,9 +1,12 @@
 import { prisma } from "@standup/shared";
 import { generateAndSaveReport } from "../../actions/reports";
-import Link from "next/link";
 
 export default async function ReportsPage({ searchParams }: { searchParams: { projectId?: string } }) {
-  const projects = await prisma.project.findMany({ orderBy: { name: 'asc' } });
+  // ДОБАВЛЕНО: where: { isActive: true }
+  const projects = await prisma.project.findMany({ 
+    where: { isActive: true }, 
+    orderBy: { name: 'asc' } 
+  });
   
   const projectId = searchParams.projectId;
   
@@ -19,7 +22,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: { pr
       
       <div className="bg-white p-6 rounded-lg shadow-sm border mb-8 flex items-end gap-4 max-w-2xl">
         <form method="GET" action="/reports" className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Выберите проект для просмотра или генерации отчёта:</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Выберите активный проект:</label>
           <div className="flex gap-2">
             <select name="projectId" defaultValue={projectId || ""} className="flex-1 p-2 border rounded">
               <option value="" disabled>-- Не выбран --</option>
@@ -58,7 +61,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: { pr
                     {new Date(report.createdAt).toLocaleString("ru-RU", { dateStyle: 'long', timeStyle: 'short' })}
                   </span>
                 </div>
-                {/* CSS класс whitespace-pre-wrap сохраняет переносы строк Markdown-ответа от ИИ */}
                 <div className="p-4 text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
                   {report.content}
                 </div>
