@@ -1,5 +1,5 @@
 "use server";
-import { prisma, generateProjectReport } from "@standup/shared";
+import { prisma, generateProjectReport, generateEmployeeReport } from "@standup/shared";
 import { revalidatePath } from "next/cache";
 
 export async function generateAndSaveReport(formData: FormData) {
@@ -9,7 +9,21 @@ export async function generateAndSaveReport(formData: FormData) {
   const content = await generateProjectReport(projectId);
 
   await prisma.report.create({
-    data: { projectId, content }
+    data: { projectId, content } // userId останется null
+  });
+
+  revalidatePath("/reports");
+}
+
+export async function generateAndSaveEmployeeReport(formData: FormData) {
+  const userId = formData.get("userId") as string;
+  const period = formData.get("period") as "today" | "week";
+  if (!userId) return;
+
+  const content = await generateEmployeeReport(userId, period);
+
+  await prisma.report.create({
+    data: { userId, content } // projectId останется null
   });
 
   revalidatePath("/reports");

@@ -30,6 +30,7 @@ model User {
   tasks               Task[]
   checkIns            CheckIn[]
   customQuestions     Question[] @relation("UserCustomQuestions")
+  reports             Report[]
 }
 
 model Role {
@@ -117,8 +118,10 @@ model Answer {
 
 model Report {
   id        String   @id @default(uuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id])
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
   content   String   @db.Text
   createdAt DateTime @default(now())
 }
