@@ -3,8 +3,9 @@ import { InlineKeyboard } from "grammy";
 import { MyContext, prisma } from "../index";
 
 export async function eveningConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
+  // ДОБАВЛЕНО: include: { roles: true }
   const user = await conversation.external(() => 
-    prisma.user.findUnique({ where: { telegramId: ctx.from?.id } })
+    prisma.user.findUnique({ where: { telegramId: ctx.from?.id }, include: { roles: true } })
   );
   if (!user) return;
 
@@ -49,15 +50,19 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
     }
   }
 
-  // 2. Вечерние вопросы (ролевые и кастомные)
+  // ИСПРАВЛЕНА ЛОГИКА ФИЛЬТРАЦИИ ВОПРОСОВ
   const questions = await conversation.external(() => 
     prisma.question.findMany({
       where: {
         checkInTime: { in: ["EVENING", "BOTH"] },
-        OR: [{ targetUserId: user.id }, { targetRoleId: user.roleId }]
+        OR: [
+          { targetUserId: user.id },
+          { targetRoleId: { in: user.roles.map(r => r.id) } },
+          { targetUserId: null, targetRoleId: null }
+        ]
       }
     })
-  );
+  )
 
   for (const q of questions) {
     await ctx.reply(q.text); // Упрощенно ждем текст, для масштабируемости можно добавить кнопки как утром

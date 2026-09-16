@@ -8,7 +8,10 @@ export async function generateProjectReport(projectId: string) {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: { 
-      tasks: { include: { assignee: { select: { name: true, role: { select: { name: true } } } } } }
+      tasks: { 
+        // ДОБАВЛЕНО: выбираем roles вместо role
+        include: { assignee: { select: { name: true, roles: { select: { name: true } } } } } 
+      }
     }
   });
 
@@ -18,7 +21,8 @@ export async function generateProjectReport(projectId: string) {
     title: t.title,
     status: t.status,
     assignee: t.assignee?.name || "Не назначен",
-    role: t.assignee?.role?.name || "Нет роли"
+    // ИЗМЕНЕНО: собираем имена всех ролей через запятую
+    role: t.assignee?.roles?.map(r => r.name).join(", ") || "Нет роли"
   }));
 
   const prompt = `

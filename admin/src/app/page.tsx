@@ -3,8 +3,9 @@ import { createUser, toggleUserStatus } from "../actions/users";
 import EditUser from "../components/EditUser";
 
 export default async function UsersPage() {
-  const users = await prisma.user.findMany({ include: { role: true }, orderBy: { name: 'asc' } });
-  const roles = await prisma.role.findMany();
+  // Меняем role на roles
+  const users = await prisma.user.findMany({ include: { roles: true }, orderBy: { name: 'asc' } });
+  const roles = await prisma.role.findMany({ orderBy: { name: 'asc' } });
 
   const activeUsers = users.filter(u => u.isActive);
   const inactiveUsers = users.filter(u => !u.isActive);
@@ -15,12 +16,20 @@ export default async function UsersPage() {
         <strong className="text-lg block">{user.name}</strong>
         {!isActive && <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">Неактивен</span>}
       </div>
-      <div className="text-sm text-gray-500 mt-1">
-        <span className="bg-gray-100 px-2 py-1 rounded text-xs mr-2">{user.role?.name || "Нет роли"}</span>
+      <div className="text-sm text-gray-500 mt-2 mb-2">
+        <div className="flex flex-wrap gap-1 mb-2">
+          {user.roles.length > 0 ? (
+            user.roles.map((r: any) => (
+              <span key={r.id} className="bg-gray-100 px-2 py-1 rounded text-xs">{r.name}</span>
+            ))
+          ) : (
+            <span className="bg-gray-100 px-2 py-1 rounded text-xs">Нет роли</span>
+          )}
+        </div>
         Таймзона: {user.timezone} | {user.workStart}-{user.workEnd}
       </div>
       
-      <div className="flex gap-4 items-center mt-2">
+      <div className="flex gap-4 items-center mt-2 border-t pt-2">
         <EditUser user={user} roles={roles} />
         <form action={toggleUserStatus} className="inline mt-2">
           <input type="hidden" name="userId" value={user.id} />
@@ -53,10 +62,19 @@ export default async function UsersPage() {
       <form action={createUser} className="mb-8 p-6 bg-white rounded-lg shadow-sm border border-gray-100 max-w-md">
         <h3 className="text-lg font-medium mb-4">Добавить сотрудника</h3>
         <input name="name" placeholder="Имя сотрудника" required className="w-full mb-3 p-2 border border-gray-300 rounded focus:outline-blue-500" />
-        <select name="roleId" className="w-full mb-4 p-2 border border-gray-300 rounded focus:outline-blue-500">
-          <option value="">-- Без роли --</option>
-          {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-        </select>
+        
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">Роли</label>
+          <div className="grid grid-cols-2 gap-2 p-3 border border-gray-300 rounded max-h-40 overflow-y-auto">
+            {roles.map(r => (
+              <label key={r.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" name="roleIds" value={r.id} />
+                {r.name}
+              </label>
+            ))}
+          </div>
+        </div>
+
         <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition">Создать</button>
       </form>
 

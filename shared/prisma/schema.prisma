@@ -12,8 +12,7 @@ model User {
   telegramId          BigInt?   @unique
   inviteToken         String?   @unique
   name                String
-  roleId              String?
-  role                Role?     @relation(fields: [roleId], references: [id])
+  roles               Role[]    @relation("UserRoles") 
   timezone            String    @default("Asia/Bishkek")
   workStart           String    @default("10:00") // HH:mm
   workEnd             String    @default("19:00") // HH:mm
@@ -36,7 +35,7 @@ model User {
 model Role {
   id        String     @id @default(uuid())
   name      String     @unique // developer, sales, etc.
-  users     User[]
+  users     User[]     @relation("UserRoles")
   questions Question[] @relation("RoleQuestions")
 }
 

@@ -3,28 +3,32 @@ import { InlineKeyboard } from "grammy";
 import { MyContext, prisma } from "../index";
 
 export async function morningConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
-  // Ищем юзера и его проекты
+  // ДОБАВЛЕНО: include: { roles: true }
   const user = await conversation.external(() => 
-    prisma.user.findUnique({ where: { telegramId: ctx.from?.id }, include: { projects: true } })
+    prisma.user.findUnique({ where: { telegramId: ctx.from?.id }, include: { projects: true, roles: true } })
   );
   if (!user) return;
 
   await ctx.reply("Давай составим план на день! 📝");
 
-  // Создаем запись чекина
   const checkIn = await conversation.external(() => 
     prisma.checkIn.create({ data: { userId: user.id, type: "MORNING" } })
   );
 
-  // Получаем вопросы (УТРО или ОБА), привязанные к юзеру ИЛИ его роли
+  // ИСПРАВЛЕНА ЛОГИКА ФИЛЬТРАЦИИ ВОПРОСОВ
   const questions = await conversation.external(() => 
     prisma.question.findMany({
       where: {
         checkInTime: { in: ["MORNING", "BOTH"] },
-        OR: [{ targetUserId: user.id }, { targetRoleId: user.roleId }]
+        OR: [
+          { targetUserId: user.id }, // Персональные
+          { targetRoleId: { in: user.roles.map(r => r.id) } }, // По любой из ролей юзера
+          { targetUserId: null, targetRoleId: null } // Общие вопросы (для всех)
+        ]
       }
     })
   );
+
 
   // 1. Задаем кастомные вопросы
   for (const q of questions) {

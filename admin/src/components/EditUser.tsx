@@ -24,21 +24,28 @@ export default function EditUser({ user, roles }: { user: any, roles: any[] }) {
     );
   }
 
+  // Получаем массив ID ролей текущего юзера
+  const userRoleIds = user.roles?.map((r: any) => r.id) || [];
+
   return (
     <form action={async (fd) => { await updateUser(fd); setIsOpen(false); }} className="mt-4 p-4 bg-gray-50 border rounded-lg text-sm">
       <input type="hidden" name="userId" value={user.id} />
       
-      <div className="grid grid-cols-2 gap-3 mb-3">
-        <div>
-          <label className="block text-gray-600 mb-1">Имя</label>
-          <input name="name" defaultValue={user.name} required className="w-full p-1.5 border rounded" />
-        </div>
-        <div>
-          <label className="block text-gray-600 mb-1">Роль</label>
-          <select name="roleId" defaultValue={user.roleId || ""} className="w-full p-1.5 border rounded">
-            <option value="">-- Без роли --</option>
-            {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
+      <div className="mb-3">
+        <label className="block text-gray-600 mb-1">Имя</label>
+        <input name="name" defaultValue={user.name} required className="w-full p-1.5 border rounded" />
+      </div>
+
+      <div className="mb-3">
+        <label className="block text-gray-600 mb-1">Роли</label>
+        <div className="grid grid-cols-2 gap-2 p-2 border rounded bg-white max-h-32 overflow-y-auto">
+          {roles.map(r => (
+            <label key={r.id} className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="roleIds" value={r.id} defaultChecked={userRoleIds.includes(r.id)} />
+              {r.name}
+            </label>
+          ))}
+          {roles.length === 0 && <span className="text-gray-400">Нет доступных ролей</span>}
         </div>
       </div>
 
