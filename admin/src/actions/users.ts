@@ -57,6 +57,18 @@ export async function toggleUserStatus(formData: FormData) {
 
 export async function deleteUser(formData: FormData) {
   const id = formData.get("userId") as string;
-  await prisma.user.delete({ where: { id } });
+  try {
+    // Перепроверяем на сервере, что истории реально нет (защита от гонки/хаков)
+    const user = await prisma.user.findUnique({
+      where: { id },
+      include: { _count: { select: { checkIns: true, tasks: true } } }
+    });
+
+    if (!user || user._count.checkIns > 0 || user._count.tasks > 0) return;
+
+    await prisma.user.delete({ where: { id } });
+  } catch (error) {
+    console.error("Ошибка удаления пользователя:", error);
+  }
   revalidatePath("/");
 }

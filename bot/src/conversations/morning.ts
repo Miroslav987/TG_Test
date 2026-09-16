@@ -61,31 +61,60 @@ export async function morningConversation(conversation: Conversation<MyContext>,
   user.projects.forEach(p => projectKb.text(p.name, `proj_${p.id}`).row());
   
   await ctx.reply("Над каким проектом сегодня работаешь?", { reply_markup: projectKb });
-  const projCtx = await conversation.waitForCallbackQuery(/proj_.+/);
+   const projCtx = await conversation.waitForCallbackQuery(/proj_.+/);
   const projectId = projCtx.match.split("_")[1];
   await projCtx.answerCallbackQuery();
 
-  // 3. Выбор задач из проекта
-  const tasks = await conversation.external(() => 
-    prisma.task.findMany({ where: { projectId, assigneeId: user.id, status: { not: "DONE" } } })
+  // Подгружаем проект, чтобы узнать, нужны ли таски
+  const project = await conversation.external(() => 
+    prisma.project.findUnique({ where: { id: projectId } })
   );
+  if (!project) return;
 
-  if (tasks.length > 0) {
-    const taskKb = new InlineKeyboard();
-    tasks.forEach(t => taskKb.text(t.title, `task_${t.id}`).row());
-    taskKb.text("👉 Напишу текстом", "task_custom");
+  // 3. Выбор задач (или ввод текста)
+  if (project.tasksRequired) {
+    const tasks = await conversation.external(() => 
+      prisma.task.findMany({ where: { projectId, assigneeId: user.id, status: { not: "DONE" } } })
+    );
 
-    await ctx.reply("Выбери главную задачу на сегодня (или введи новую):", { reply_markup: taskKb });
-    const taskCtx = await conversation.waitForCallbackQuery(/task_.+/);
-    await taskCtx.answerCallbackQuery();
+    if (tasks.length > 0) {
+      const taskKb = new InlineKeyboard();
+      tasks.forEach(t => taskKb.text(t.title, `task_${t.id}`).row());
+      taskKb.text("👉 Напишу текстом", "task_custom");
 
-    if (taskCtx.match === "task_custom") {
-      await ctx.reply("Кратко опиши свою задачу на сегодня:");
-      await conversation.waitFor("message:text");
+      await ctx.reply("Выбери главную задачу на сегодня (или введи новую):", { reply_markup: taskKb });
+      const taskCtx = await conversation.waitForCallbackQuery(/task_.+/);
+      await taskCtx.answerCallbackQuery();
+
+      if (taskCtx.match === "task_custom") {
+        await ctx.reply("Кратко опиши свою задачу на сегодня:");
+        const customCtx = await conversation.waitFor("message:text");
+        // СОЗДАЁМ НАСТОЯЩУЮ ЗАДАЧУ
+        await conversation.external(() => 
+          prisma.task.create({
+            data: { title: customCtx.message!.text, projectId, assigneeId: user.id, status: "IN_PROGRESS" }
+          })
+        );
+      }
+    } else {
+      await ctx.reply("Открытых задач по проекту в базе нет. Опиши кратко, что планируешь делать:");
+      const customCtx = await conversation.waitFor("message:text");
+      // СОЗДАЁМ НАСТОЯЩУЮ ЗАДАЧУ
+      await conversation.external(() => 
+        prisma.task.create({
+          data: { title: customCtx.message!.text, projectId, assigneeId: user.id, status: "IN_PROGRESS" }
+        })
+      );
     }
   } else {
-    await ctx.reply("Открытых задач по проекту в базе нет. Опиши кратко, что планируешь делать:");
-    await conversation.waitFor("message:text");
+    // Неформальный проект (без задач)
+    await ctx.reply("Что планируешь делать сегодня?");
+    const answerCtx = await conversation.waitFor("message:text");
+    await conversation.external(() => 
+      prisma.answer.create({
+        data: { checkInId: checkIn.id, value: answerCtx.message!.text } // без questionId
+      })
+    );
   }
 
   await ctx.reply("✅ Отлично! Утренний план сохранен. Продуктивного дня!");

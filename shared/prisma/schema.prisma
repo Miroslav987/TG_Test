@@ -43,6 +43,7 @@ model Project {
   id       String    @id @default(uuid())
   name     String
   isActive Boolean   @default(true)
+  tasksRequired  Boolean   @default(true)
   users    User[]
   tasks    Task[]
   reports  Report[]  // <-- НОВАЯ СВЯЗЬ

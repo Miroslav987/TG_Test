@@ -47,6 +47,18 @@ export async function toggleProjectStatus(formData: FormData) {
 
 export async function deleteProject(formData: FormData) {
   const id = formData.get("projectId") as string;
-  await prisma.project.delete({ where: { id } });
+  try {
+    // Перепроверяем на сервере
+    const project = await prisma.project.findUnique({
+      where: { id },
+      include: { _count: { select: { tasks: true, reports: true } } }
+    });
+
+    if (!project || project._count.tasks > 0 || project._count.reports > 0) return;
+
+    await prisma.project.delete({ where: { id } });
+  } catch (error) {
+    console.error("Ошибка удаления проекта:", error);
+  }
   revalidatePath("/projects");
 }
