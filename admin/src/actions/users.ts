@@ -15,24 +15,39 @@ export async function createUser(formData: FormData) {
       timezone: "Asia/Bishkek", 
     }
   });
-
   revalidatePath("/");
 }
 
-// НОВЫЙ ЭКШН
-export async function updateUserSchedule(formData: FormData) {
-  const userId = formData.get("userId") as string;
+export async function updateUser(formData: FormData) {
+  const id = formData.get("userId") as string;
+  const name = formData.get("name") as string;
+  const roleId = formData.get("roleId") as string;
   const timezone = formData.get("timezone") as string;
   const workStart = formData.get("workStart") as string;
   const workEnd = formData.get("workEnd") as string;
-  
-  // Собираем массив выбранных чекбоксов (1-7)
   const workDays = formData.getAll("workDays").map(Number);
 
   await prisma.user.update({
-    where: { id: userId },
-    data: { timezone, workStart, workEnd, workDays }
+    where: { id },
+    data: { 
+      name, 
+      roleId: roleId || null, 
+      timezone, 
+      workStart, 
+      workEnd, 
+      workDays 
+    }
   });
+  revalidatePath("/");
+}
 
+export async function toggleUserStatus(formData: FormData) {
+  const id = formData.get("userId") as string;
+  const isActive = formData.get("isActive") === "true";
+
+  await prisma.user.update({
+    where: { id },
+    data: { isActive: !isActive }
+  });
   revalidatePath("/");
 }

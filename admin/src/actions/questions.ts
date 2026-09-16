@@ -2,13 +2,13 @@
 import { prisma } from "@standup/shared";
 import { revalidatePath } from "next/cache";
 
-export async function createQuestion(formData: FormData) {
+// Функция парсинга повторяется, выносим общую логику
+function extractQuestionData(formData: FormData) {
   const text = formData.get("text") as string;
-  const type = formData.get("type") as any; // TEXT, NUMBER, TIME, YES_NO, SELECT
-  const checkInTime = formData.get("checkInTime") as any; // MORNING, EVENING, BOTH
+  const type = formData.get("type") as any;
+  const checkInTime = formData.get("checkInTime") as any;
   const isRequired = formData.get("isRequired") === "on";
 
-  // Обработка вариантов для типа SELECT
   let options: string[] = [];
   if (type === "SELECT") {
     const optsString = formData.get("options") as string;
@@ -19,17 +19,25 @@ export async function createQuestion(formData: FormData) {
   const targetRoleId = targetType === "ROLE" ? formData.get("targetRoleId") as string : null;
   const targetUserId = targetType === "USER" ? formData.get("targetUserId") as string : null;
 
-  await prisma.question.create({
-    data: {
-      text,
-      type,
-      checkInTime,
-      isRequired,
-      options,
-      targetRoleId: targetRoleId || null,
-      targetUserId: targetUserId || null,
-    }
-  });
+  return { text, type, checkInTime, isRequired, options, targetRoleId, targetUserId };
+}
 
+export async function createQuestion(formData: FormData) {
+  await prisma.question.create({ data: extractQuestionData(formData) });
+  revalidatePath("/questions");
+}
+
+export async function updateQuestion(formData: FormData) {
+  const id = formData.get("id") as string;
+  await prisma.question.update({
+    where: { id },
+    data: extractQuestionData(formData)
+  });
+  revalidatePath("/questions");
+}
+
+export async function deleteQuestion(formData: FormData) {
+  const id = formData.get("id") as string;
+  await prisma.question.delete({ where: { id } });
   revalidatePath("/questions");
 }
