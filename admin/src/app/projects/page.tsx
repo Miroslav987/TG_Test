@@ -1,5 +1,6 @@
 import { prisma } from "@standup/shared";
 import { createProject, addUserToProject, createTask, toggleProjectStatus, deleteProject } from "../../actions/projects";
+import DeleteProjectButton from "@/components/DeleteProjectButton";
 
 const STATUS_COLORS: Record<string, string> = {
   TODO: "bg-gray-100 text-gray-700",
@@ -41,10 +42,7 @@ export default async function ProjectsPage() {
             </form>
             
             {canDelete ? (
-              <form action={deleteProject} onSubmit={(e) => !confirm(`Удалить проект "${project.name}"?`) && e.preventDefault()}>
-                <input type="hidden" name="projectId" value={project.id} />
-                <button type="submit" className="text-red-600 hover:underline">🗑 Удалить</button>
-              </form>
+            <DeleteProjectButton projectId={project.id} projectName={project.name} />
             ) : (
               <span className="text-gray-400 text-xs italic" title="Удалите все задачи и отчёты перед полным удалением">
                 Нельзя удалить — есть история, используйте архивацию

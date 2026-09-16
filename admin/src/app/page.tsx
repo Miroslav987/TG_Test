@@ -1,6 +1,7 @@
 import { prisma } from "@standup/shared";
 import { createUser, toggleUserStatus, deleteUser } from "../actions/users";
 import EditUser from "../components/EditUser";
+import DeleteUserButton from "@/components/DeleteUserButton";
 
 export default async function UsersPage() {
   // ДОБАВЛЕНО: _count для проверок истории
@@ -52,12 +53,7 @@ export default async function UsersPage() {
 
           {/* НОВАЯ КНОПКА УДАЛЕНИЯ */}
           {canDelete && (
-            <form action={deleteUser} className="inline mt-2" onSubmit={(e) => !confirm(`Точно удалить сотрудника "${user.name}"?`) && e.preventDefault()}>
-              <input type="hidden" name="userId" value={user.id} />
-              <button type="submit" className="text-xs text-red-600 hover:underline">
-                🗑 Удалить
-              </button>
-            </form>
+            <DeleteUserButton userId={user.id} userName={user.name} />
           )}
         </div>
         
