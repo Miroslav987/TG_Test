@@ -47,6 +47,7 @@ export async function GET(request: Request) {
   const secret = new TextEncoder().encode(process.env.AUTH_SECRET);
   const token = await new SignJWT({ userId: user.id, name: user.name })
     .setProtectedHeader({ alg: 'HS256' })
+    .setSubject(user.id) // <-- ДОБАВЛЕНО: установка subject
     .setExpirationTime('30d')
     .sign(secret);
 
