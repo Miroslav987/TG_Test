@@ -53,5 +53,27 @@ bot.start({
   },
 });
 
+bot.callbackQuery(/^ack_task_.+/, async (ctx) => {
+  const taskId = ctx.callbackQuery.data.replace("ack_task_", "");
+  
+  try {
+    await prisma.task.update({
+      where: { id: taskId },
+      data: { acknowledgedAt: new Date() }
+    });
+    
+    await ctx.answerCallbackQuery("Принято!");
+    
+    const text = ctx.callbackQuery.message?.text || "📌 Задача";
+    const dateStr = new Date().toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+    
+    // Редактируем сообщение, удаляя инлайн-клавиатуру и дописывая статус
+    await ctx.editMessageText(`${text}\n\n✅ Принято ${dateStr}`);
+  } catch (error) {
+    console.error("Ошибка при подтверждении задачи:", error);
+    await ctx.answerCallbackQuery({ text: "Ошибка (возможно, задача удалена)", show_alert: true });
+  }
+});
+
 // Экспортируем prisma дальше, чтобы файлы morning.ts и evening.ts не сломались
 export { prisma };

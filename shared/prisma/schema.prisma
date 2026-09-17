@@ -66,6 +66,7 @@ model Task {
   assignee   User?      @relation(fields: [assigneeId], references: [id])
   status     TaskStatus @default(TODO)
   deadline   DateTime?
+  acknowledgedAt DateTime? 
 }
 
 enum QuestionType {

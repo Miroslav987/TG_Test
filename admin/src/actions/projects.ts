@@ -1,5 +1,5 @@
 "use server";
-import { prisma } from "@standup/shared";
+import { prisma, sendTelegramMessage } from "@standup/shared";
 import { revalidatePath } from "next/cache";
 
 export async function createProject(formData: FormData) {
@@ -13,10 +13,20 @@ export async function addUserToProject(formData: FormData) {
   const userId = formData.get("userId") as string;
   
   if (projectId && userId) {
-    await prisma.project.update({
+    const project = await prisma.project.update({
       where: { id: projectId },
       data: { users: { connect: { id: userId } } }
     });
+    
+    // Получаем пользователя для отправки уведомления
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (user?.telegramId) {
+      await sendTelegramMessage(
+        user.telegramId,
+        `📂 Тебя добавили в проект «*${project.name}*»`
+      );
+    }
+    
     revalidatePath("/projects");
   }
 }
@@ -27,14 +37,25 @@ export async function createTask(formData: FormData) {
   const assigneeId = formData.get("assigneeId") as string;
   const deadlineStr = formData.get("deadline") as string;
 
-  await prisma.task.create({
+  const newTask = await prisma.task.create({
     data: {
       title,
       projectId,
       assigneeId: assigneeId || null,
       deadline: deadlineStr ? new Date(deadlineStr) : null,
-    }
+    },
+    include: { project: true, assignee: true } // Сразу подтягиваем связи
   });
+
+  // Если есть исполнитель с привязанным Telegram — уведомляем его
+  if (newTask.assignee?.telegramId) {
+    await sendTelegramMessage(
+      newTask.assignee.telegramId,
+      `📌 Тебе назначена новая задача в проекте «*${newTask.project.name}*»:\n${newTask.title}`,
+      [[{ text: "✅ Принял", callback_data: `ack_task_${newTask.id}` }]]
+    );
+  }
+
   revalidatePath("/projects");
 }
 
