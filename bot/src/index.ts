@@ -7,8 +7,7 @@ import { conversations, createConversation } from "@grammyjs/conversations";
 import { startScheduler } from "./scheduler";
 import { morningConversation } from "./conversations/morning";
 import { eveningConversation } from "./conversations/evening";
-
-// 3. Берем готовый инстанс из shared
+import { newTaskConversation } from "./conversations/newTask"; // <-- ДОБАВЛЕНО
 import { prisma } from "@standup/shared";
 
 export type MyContext = Context & { session: any }; 
@@ -19,7 +18,9 @@ bot.use(conversations());
 
 bot.use(createConversation(morningConversation, "morning"));
 bot.use(createConversation(eveningConversation, "evening"));
+bot.use(createConversation(newTaskConversation, "newTask")); // <-- ДОБАВЛЕНО
 
+// Команда /start
 bot.command("start", async (ctx) => {
   const token = ctx.match;
   if (!token) return ctx.reply("Привет! Для использования бота нужна ссылка-приглашение.");
@@ -35,7 +36,11 @@ bot.command("start", async (ctx) => {
   await ctx.reply(`Отлично, ${user.name}! Твой Telegram привязан. Я буду писать тебе по расписанию.`);
 });
 
-// 1. ДОБАВЛЕНЫ ОБРАБОТЧИКИ КНОПОК
+// Команда /newtask <-- ДОБАВЛЕНО
+bot.command("newtask", async (ctx) => {
+  await ctx.conversation.enter("newTask");
+});
+
 bot.callbackQuery("start_morning", async (ctx) => {
   await ctx.answerCallbackQuery();
   await ctx.conversation.enter("morning");
@@ -46,13 +51,7 @@ bot.callbackQuery("start_evening", async (ctx) => {
   await ctx.conversation.enter("evening");
 });
 
-bot.start({
-  onStart: () => {
-    console.log("Bot is running!");
-    startScheduler(bot);
-  },
-});
-
+// Обработчик принятия задачи
 bot.callbackQuery(/^ack_task_.+/, async (ctx) => {
   const taskId = ctx.callbackQuery.data.replace("ack_task_", "");
   
@@ -67,7 +66,6 @@ bot.callbackQuery(/^ack_task_.+/, async (ctx) => {
     const text = ctx.callbackQuery.message?.text || "📌 Задача";
     const dateStr = new Date().toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
     
-    // Редактируем сообщение, удаляя инлайн-клавиатуру и дописывая статус
     await ctx.editMessageText(`${text}\n\n✅ Принято ${dateStr}`);
   } catch (error) {
     console.error("Ошибка при подтверждении задачи:", error);
@@ -75,5 +73,17 @@ bot.callbackQuery(/^ack_task_.+/, async (ctx) => {
   }
 });
 
-// Экспортируем prisma дальше, чтобы файлы morning.ts и evening.ts не сломались
+// Обработчик любого другого текста (Catch-all) <-- ДОБАВЛЕНО В САМОМ КОНЦЕ
+bot.on("message:text", async (ctx) => {
+  await ctx.reply("Не понял тебя 🙂\n\nЕсли хочешь добавить задачу — напиши /newtask.\nЕсли ждёшь утренний/вечерний чек-ин — дождись сообщения от меня по расписанию.");
+});
+
+// Запуск бота (Перенесено в самый низ) <-- ИЗМЕНЁН ПОРЯДОК
+bot.start({
+  onStart: () => {
+    console.log("Bot is running!");
+    startScheduler(bot);
+  },
+});
+
 export { prisma };
