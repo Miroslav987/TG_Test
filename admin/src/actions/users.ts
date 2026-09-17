@@ -72,3 +72,14 @@ export async function deleteUser(formData: FormData) {
   }
   revalidatePath("/");
 }
+
+export async function toggleAdmin(formData: FormData) {
+  const id = formData.get("userId") as string;
+  const isAdmin = formData.get("isAdmin") === "true";
+
+  await prisma.user.update({
+    where: { id },
+    data: { isAdmin: !isAdmin }
+  });
+  revalidatePath("/");
+}

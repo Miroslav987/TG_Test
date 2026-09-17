@@ -1,5 +1,5 @@
 import { prisma } from "@standup/shared";
-import { createUser, toggleUserStatus, deleteUser } from "../actions/users";
+import { createUser, toggleUserStatus, deleteUser, toggleAdmin } from "../actions/users";
 import EditUser from "../components/EditUser";
 import DeleteUserButton from "@/components/DeleteUserButton";
 
@@ -18,13 +18,15 @@ export default async function UsersPage() {
   const inactiveUsers = users.filter(u => !u.isActive);
 
   const UserCard = ({ user, isActive }: { user: any, isActive: boolean }) => {
-    // Проверка: можно удалить, только если нет чекинов и тасок
     const canDelete = user._count.checkIns === 0 && user._count.tasks === 0;
 
     return (
       <div className={`border border-gray-200 bg-white p-5 rounded-lg shadow-sm ${!isActive ? 'opacity-60 grayscale' : ''}`}>
         <div className="flex justify-between items-start">
-          <strong className="text-lg block">{user.name}</strong>
+          <div className="flex items-center gap-2">
+            <strong className="text-lg block">{user.name}</strong>
+            {user.isAdmin && <span className="bg-purple-100 text-purple-800 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded">Admin</span>}
+          </div>
           {!isActive && <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">Неактивен</span>}
         </div>
         <div className="text-sm text-gray-500 mt-2 mb-2">
@@ -39,6 +41,8 @@ export default async function UsersPage() {
           </div>
           Таймзона: {user.timezone} | {user.workStart}-{user.workEnd}
         </div>
+
+        
         
         <div className="flex gap-4 items-center mt-2 border-t pt-2">
           <EditUser user={user} roles={roles} />
@@ -48,6 +52,14 @@ export default async function UsersPage() {
             <input type="hidden" name="isActive" value={String(user.isActive)} />
             <button type="submit" className="text-xs text-orange-600 hover:underline">
               {isActive ? "🚫 Деактивировать" : "✅ Активировать"}
+            </button>
+          </form>
+
+          <form action={toggleAdmin} className="inline mt-2">
+            <input type="hidden" name="userId" value={user.id} />
+            <input type="hidden" name="isAdmin" value={String(user.isAdmin)} />
+            <button type="submit" className="text-xs text-purple-600 hover:underline">
+              {user.isAdmin ? "⬇️ Забрать права админа" : "⬆️ Сделать админом"}
             </button>
           </form>
 
