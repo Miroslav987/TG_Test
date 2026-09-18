@@ -71,7 +71,7 @@ for (const q of questions) {
       prisma.answer.create({ data: { checkInId: checkIn.id, questionId: q.id, value: answerVal } })
     );
   }
-  await ctx.reply("Как в целом прошел день? (свободный итог)");
+  await ctx.reply("Как в целом прошел день? ");
   const summaryCtx = await conversation.waitFor("message:text");
   await conversation.external(() => 
     prisma.answer.create({ data: { checkInId: checkIn.id, value: summaryCtx.message!.text } })

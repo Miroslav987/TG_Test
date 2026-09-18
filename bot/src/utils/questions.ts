@@ -5,16 +5,23 @@ import { MyContext } from "../index";
 export async function askQuestionHelper(conversation: Conversation<MyContext>, ctx: MyContext, q: any): Promise<string> {
   if (q.type === "YES_NO") {
     const kb = new InlineKeyboard().text("✅ Да", "yes").text("❌ Нет", "no");
-    await ctx.reply(q.text, { reply_markup: kb });
+    // Сохраняем msg для удаления кнопок
+    const msg = await ctx.reply(q.text, { reply_markup: kb });
     const resp = await conversation.waitForCallbackQuery(["yes", "no"]);
+    
+    // Убираем инлайн-клавиатуру, заменяя её на пустую
+    await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msg.message_id, { reply_markup: new InlineKeyboard() });
     await resp.answerCallbackQuery();
     return resp.match === "yes" ? "Да" : "Нет";
   } 
   else if (q.type === "SELECT") {
     const kb = new InlineKeyboard();
     q.options.forEach((opt: string, idx: number) => kb.text(opt, `sel_${idx}`).row());
-    await ctx.reply(q.text, { reply_markup: kb });
+    const msg = await ctx.reply(q.text, { reply_markup: kb });
     const resp = await conversation.waitForCallbackQuery(/sel_\d+/);
+    
+    await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msg.message_id, { reply_markup: new InlineKeyboard() });
+    
     const idx = parseInt(resp.callbackQuery.data.replace("sel_", ""));
     await resp.answerCallbackQuery();
     return q.options[idx];
@@ -41,6 +48,8 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
       const data = resp.callbackQuery.data;
       
       if (data === "submit_multi") {
+        // Убираем кнопки после нажатия "Готово"
+        await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msgId, { reply_markup: new InlineKeyboard() });
         await resp.answerCallbackQuery();
         break;
       } else {
