@@ -12,6 +12,7 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - BOT_TOKEN=${BOT_TOKEN}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - APP_URL=${APP_URL}
 
   admin:
     build:
@@ -19,6 +20,7 @@ services:
       dockerfile: Dockerfile
       args:
         - NEXT_PUBLIC_BOT_USERNAME=${NEXT_PUBLIC_BOT_USERNAME}
+        - NEXT_PUBLIC_APP_URL=${APP_URL}
     container_name: standup_admin
     restart: unless-stopped
     ports:
@@ -28,3 +30,5 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - AUTH_SECRET=${AUTH_SECRET}
       - NEXT_PUBLIC_BOT_USERNAME=${NEXT_PUBLIC_BOT_USERNAME}
+      - NEXTAUTH_URL=${APP_URL}
+      - NEXT_PUBLIC_APP_URL=${APP_URL}
