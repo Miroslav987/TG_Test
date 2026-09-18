@@ -1,34 +1,66 @@
-version: '3.8'
-
 services:
+  # БАЗА ДАННЫХ
+  db:
+    image: postgres:15-alpine
+    container_name: standup_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-standup_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - standup_pg_data:/var/lib/postgresql/data
+
+  # TELEGRAM БОТ
   bot:
     build:
       context: .
-      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BOT_USERNAME: ${NEXT_PUBLIC_BOT_USERNAME}
+        NEXT_PUBLIC_APP_URL: ${APP_URL}
     container_name: standup_bot
     restart: unless-stopped
+    depends_on:
+      - db
     command: npm run start --workspace=bot
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - BOT_TOKEN=${BOT_TOKEN}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - APP_URL=${APP_URL}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-standup_db}
+      BOT_TOKEN: ${BOT_TOKEN}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      APP_URL: ${APP_URL}
 
+  # ПАНЕЛЬ УПРАВЛЕНИЯ (NEXT.JS)
   admin:
     build:
       context: .
-      dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_BOT_USERNAME=${NEXT_PUBLIC_BOT_USERNAME}
-        - NEXT_PUBLIC_APP_URL=${APP_URL}
+        NEXT_PUBLIC_BOT_USERNAME: ${NEXT_PUBLIC_BOT_USERNAME}
+        NEXT_PUBLIC_APP_URL: ${APP_URL}
     container_name: standup_admin
     restart: unless-stopped
+    depends_on:
+      - db
     ports:
       - "3000:3000"
-    command: sh -c "npx prisma generate --schema=shared/prisma/schema.prisma && npm run build --workspace=admin && npm run start --workspace=admin"
+    # При запуске админки накатываем структуру БД и стартуем сервер
+    command: sh -c "npx prisma db push --schema=shared/prisma/schema.prisma --accept-data-loss && npm run start --workspace=admin"
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - AUTH_SECRET=${AUTH_SECRET}
-      - NEXT_PUBLIC_BOT_USERNAME=${NEXT_PUBLIC_BOT_USERNAME}
-      - NEXTAUTH_URL=${APP_URL}
-      - NEXT_PUBLIC_APP_URL=${APP_URL}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-standup_db}
+      AUTH_SECRET: ${AUTH_SECRET}
+      NEXTAUTH_URL: ${APP_URL}
+      NEXT_PUBLIC_BOT_USERNAME: ${NEXT_PUBLIC_BOT_USERNAME}
+      NEXT_PUBLIC_APP_URL: ${APP_URL}
+
+  # NGROK ДЛЯ ПУБЛИЧНОГО ДОМЕНА
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: standup_ngrok
+    restart: unless-stopped
+    depends_on:
+      - admin
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    command: http --url=${NGROK_DOMAIN} admin:3000
+
+volumes:
+  standup_pg_data:
