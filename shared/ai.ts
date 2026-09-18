@@ -16,17 +16,31 @@ export async function generateProjectReport(projectId: string) {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
   const userIds = project.users.map(u => u.id);
-  const answers = await prisma.answer.findMany({
+
+  // 1. Стандартные ответы через чек-ины
+  const checkIns = await prisma.checkIn.findMany({
+    where: { userId: { in: userIds }, createdAt: { gte: today } },
+    include: {
+      user: { select: { name: true } },
+      answers: { 
+        where: { OR: [ { question: { includeInReport: true } }, { questionId: null } ] },
+        include: { question: { select: { text: true } } }
+      }
+    },
+    orderBy: { createdAt: 'asc' }
+  });
+
+  // 2. Ответы на плановые опросы (без чек-ина)
+  const standaloneAnswers = await prisma.answer.findMany({
     where: {
-      OR: [ { userId: { in: userIds } }, { checkIn: { userId: { in: userIds } } } ],
+      userId: { in: userIds },
+      checkInId: null,
       createdAt: { gte: today },
       OR: [ { question: { includeInReport: true } }, { questionId: null } ]
     },
     include: {
       user: { select: { name: true } },
-      checkIn: { include: { user: { select: { name: true } } } },
       question: { select: { text: true } }
     },
     orderBy: { createdAt: 'asc' }
@@ -39,15 +53,24 @@ export async function generateProjectReport(projectId: string) {
     role: t.assignee?.roles?.map(r => r.name).join(", ") || "Нет роли"
   }));
 
-  const safeAnswers = answers.map(a => ({
-    user: a.user?.name || a.checkIn?.user?.name || "Неизвестно",
+  const safeCheckIns = checkIns.map(c => ({
+    user: c.user.name,
+    type: c.type,
+    answers: c.answers.map(a => ({
+      question: a.question?.text || "Свободный ответ / Планы",
+      answer: a.value
+    }))
+  }));
+
+  const safeStandaloneAnswers = standaloneAnswers.map(a => ({
+    user: a.user?.name || "Неизвестно",
     time: a.createdAt.toISOString().split('T')[1].slice(0, 5),
-    question: a.question?.text || "Свободный ответ / Итоги",
+    question: a.question?.text || "Свободный ответ",
     answer: a.value
   }));
 
-  // ДОБАВЛЕНО: Защита от пустых данных
-  if (safeTasks.length === 0 && safeAnswers.length === 0) {
+  // ЗАЩИТА: Если нет вообще никаких данных, не дёргаем ИИ
+  if (safeTasks.length === 0 && safeCheckIns.length === 0 && safeStandaloneAnswers.length === 0) {
     return "⚠️ В проекте нет активных задач, а за выбранный период нет ни одного ответа — отчёт не сгенерирован, генерировать не из чего.";
   }
 
@@ -57,14 +80,17 @@ export async function generateProjectReport(projectId: string) {
     📋 Список задач в проекте:
     ${JSON.stringify(safeTasks, null, 2)}
 
-    💬 Ответы сотрудников на опросники за сегодня (планы, итоги, блокеры):
-    ${JSON.stringify(safeAnswers, null, 2)}
+    💬 Данные из чек-инов (планы, итоги дня):
+    ${JSON.stringify(safeCheckIns, null, 2)}
+    
+    📩 Ответы на опросы (вне чек-инов):
+    ${JSON.stringify(safeStandaloneAnswers, null, 2)}
     
     Сделай структуру:
     1. 🎯 Что сделано (задачи в статусе DONE)
     2. 🔄 В работе (задачи IN_PROGRESS)
     3. ⛔ Заблокировано (задачи BLOCKED)
-    4. 👥 Кто чем занимался (краткая сводка по сотрудникам на основе тасков и ответов)
+    4. 👥 Кто чем занимался (краткая сводка по сотрудникам на основе задач, чек-инов и опросов)
     5. 💬 Важные детали из ответов (блокеры, инсайты)
     
     Пиши профессионально, используй эмодзи для списков. Без воды. Не придумывай того, чего нет в JSON.
@@ -94,9 +120,23 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
   }
   since.setHours(0, 0, 0, 0);
 
-  const answers = await prisma.answer.findMany({
+  // 1. Стандартные ответы через чек-ины
+  const checkIns = await prisma.checkIn.findMany({
+    where: { userId: userId, createdAt: { gte: since } },
+    include: { 
+      answers: { 
+        where: { OR: [ { question: { includeInReport: true } }, { questionId: null } ] },
+        include: { question: { select: { text: true } } } 
+      } 
+    },
+    orderBy: { createdAt: 'asc' }
+  });
+
+  // 2. Ответы на плановые опросы (без чек-ина)
+  const standaloneAnswers = await prisma.answer.findMany({
     where: {
-      OR: [ { userId: userId }, { checkIn: { userId: userId } } ],
+      userId: userId,
+      checkInId: null,
       createdAt: { gte: since },
       OR: [ { question: { includeInReport: true } }, { questionId: null } ]
     },
@@ -110,15 +150,24 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
     project: t.project?.name || "Без проекта"
   }));
 
-  const safeAnswers = answers.map(a => ({
+  const safeCheckIns = checkIns.map(c => ({
+    date: c.createdAt.toISOString().split('T')[0],
+    type: c.type,
+    answers: c.answers.map(a => ({
+      question: a.question?.text || "Свободный ответ / Итоги",
+      answer: a.value
+    }))
+  }));
+
+  const safeStandaloneAnswers = standaloneAnswers.map(a => ({
     date: a.createdAt.toISOString().split('T')[0],
     time: a.createdAt.toISOString().split('T')[1].slice(0, 5),
-    question: a.question?.text || "Свободный ответ / Итоги",
+    question: a.question?.text || "Свободный ответ",
     answer: a.value
   }));
 
-  // ДОБАВЛЕНО: Защита от пустых данных
-  if (safeTasks.length === 0 && safeAnswers.length === 0) {
+  // ЗАЩИТА: Если нет вообще никаких данных, не дёргаем ИИ
+  if (safeTasks.length === 0 && safeCheckIns.length === 0 && safeStandaloneAnswers.length === 0) {
     return "⚠️ У сотрудника нет активных задач и за выбранный период нет ни одного ответа — отчёт не сгенерирован, генерировать не из чего.";
   }
 
@@ -129,8 +178,11 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
     📋 Текущие задачи сотрудника (по всем проектам):
     ${JSON.stringify(safeTasks, null, 2)}
 
-    💬 Ответы сотрудника на опросники за выбранный период:
-    ${JSON.stringify(safeAnswers, null, 2)}
+    💬 Ответы в чек-инах за выбранный период:
+    ${JSON.stringify(safeCheckIns, null, 2)}
+    
+    📩 Ответы на плановые опросы (вне чек-инов):
+    ${JSON.stringify(safeStandaloneAnswers, null, 2)}
     
     Сделай структуру:
     1. 🎯 Чем занимался (обзор задач по проектам и их статусы)

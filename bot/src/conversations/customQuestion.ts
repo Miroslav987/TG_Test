@@ -15,7 +15,7 @@ export async function customQuestionConversation(conversation: Conversation<MyCo
 
   const answerVal = await askQuestionHelper(conversation, ctx, q);
 
-  // Сохраняем ответ напрямую
+  // Сохраняем ответ напрямую с привязкой к userId
   await conversation.external(() => 
     prisma.answer.create({ 
       data: { 
@@ -28,7 +28,6 @@ export async function customQuestionConversation(conversation: Conversation<MyCo
 
   await ctx.reply("✅ Ответ сохранен, спасибо!");
 }
-
 
 // import { Conversation } from "@grammyjs/conversations";
 // import { MyContext, prisma } from "../index";

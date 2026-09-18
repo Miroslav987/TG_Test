@@ -103,7 +103,7 @@ model Question {
   text        String
   type        QuestionType
   options     String[] // Для типа SELECT
-  checkInTime CheckInTime
+  checkInTime CheckInTime? // <-- Добавьте '?'
   isRequired  Boolean      @default(true)
   includeInReport Boolean      @default(true)
 
@@ -145,8 +145,8 @@ model CheckIn {
 
 model Answer {
   id         String    @id @default(uuid())
-  checkInId  String
-  checkIn    CheckIn   @relation(fields: [checkInId], references: [id])
+  checkInId  String?  // <-- ОПЦИОНАЛЬНО
+  checkIn    CheckIn? @relation(fields: [checkInId], references: [id]) // <-- ОПЦИОНАЛЬНО
 
   userId     String?  // <-- НОВОЕ ПОЛЕ (Прямая привязка к юзеру)
   user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
