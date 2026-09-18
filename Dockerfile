@@ -1,14 +1,14 @@
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
-# Установка необходимых библиотек для Prisma в Alpine Linux
-RUN apk add --no-cache openssl libc6-compat
+# Установка OpenSSL для корректной работы Prisma
+RUN apt-get update -y && apt-get install -y openssl
 
 # Включаем pnpm
 RUN corepack enable pnpm
 
-# Копируем файлы зависимостей
+# Копируем конфигурации монорепозитория
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY shared/package.json ./shared/
 COPY bot/package.json ./bot/
