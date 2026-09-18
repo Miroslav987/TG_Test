@@ -14,7 +14,7 @@ services:
   # TELEGRAM БОТ
   bot:
     build:
-      context: .
+      context: https://github.com/Miroslav987/TG_Test.git
       args:
         NEXT_PUBLIC_BOT_USERNAME: ${NEXT_PUBLIC_BOT_USERNAME}
         NEXT_PUBLIC_APP_URL: ${APP_URL}
@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     depends_on:
       - db
-    command: npm run start --workspace=bot
+    command: pnpm --filter bot run start
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-standup_db}
       BOT_TOKEN: ${BOT_TOKEN}
@@ -32,7 +32,7 @@ services:
   # ПАНЕЛЬ УПРАВЛЕНИЯ (NEXT.JS)
   admin:
     build:
-      context: .
+      context: https://github.com/Miroslav987/TG_Test.git
       args:
         NEXT_PUBLIC_BOT_USERNAME: ${NEXT_PUBLIC_BOT_USERNAME}
         NEXT_PUBLIC_APP_URL: ${APP_URL}
@@ -42,8 +42,7 @@ services:
       - db
     ports:
       - "3000:3000"
-    # При запуске админки накатываем структуру БД и стартуем сервер
-    command: sh -c "npx prisma db push --schema=shared/prisma/schema.prisma --accept-data-loss && npm run start --workspace=admin"
+    command: sh -c "pnpm exec prisma db push --schema=shared/prisma/schema.prisma --accept-data-loss && pnpm --filter admin run start"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-standup_db}
       AUTH_SECRET: ${AUTH_SECRET}

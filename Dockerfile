@@ -2,26 +2,31 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# 1. Копируем файлы зависимостей
-COPY package*.json ./
-COPY shared/package*.json ./shared/
-COPY bot/package*.json ./bot/
-COPY admin/package*.json ./admin/
+# Включаем pnpm, который встроен в современные версии Node.js
+RUN corepack enable pnpm
 
-# 2. Устанавливаем пакеты (выполнится один раз при сборке)
-RUN npm install
+# Копируем основные манифесты и lock-файл
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-# 3. Копируем весь исходный код
+# Копируем package.json каждого проекта
+COPY shared/package.json ./shared/
+COPY bot/package.json ./bot/
+COPY admin/package.json ./admin/
+
+# Устанавливаем зависимости с помощью pnpm
+RUN pnpm install --frozen-lockfile
+
+# Копируем весь оставшийся код
 COPY . .
 
-# 4. Генерируем Prisma Client
-RUN npx prisma generate --schema=shared/prisma/schema.prisma
+# Генерируем клиент Prisma
+RUN pnpm exec prisma generate --schema=shared/prisma/schema.prisma
 
-# 5. Принимаем переменные для сборки Next.js
+# Принимаем переменные окружения для сборки Next.js
 ARG NEXT_PUBLIC_BOT_USERNAME
 ARG NEXT_PUBLIC_APP_URL
 ENV NEXT_PUBLIC_BOT_USERNAME=$NEXT_PUBLIC_BOT_USERNAME
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
 
-# 6. Собираем админку Next.js (самый тяжелый процесс для Pentium, но выполнится лишь раз!)
-RUN npm run build --workspace=admin
+# Собираем админку через фильтр pnpm
+RUN pnpm --filter admin run build
