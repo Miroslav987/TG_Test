@@ -39,8 +39,10 @@ export async function GET(request: Request) {
   });
 
   // Проверяем права
-  if (!user || !user.isActive || !user.isAdmin) {
-    return NextResponse.redirect(new URL('/login?error=denied', request.url));
+  // if (!user || !user.isActive || !user.isAdmin) {
+  //   return NextResponse.redirect(new URL('/login?error=denied', request.url));
+  const baseUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '';
+return NextResponse.redirect(`${baseUrl}/login?error=denied`);
   }
 
   // 6. Подписываем JWT
