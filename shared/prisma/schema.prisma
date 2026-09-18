@@ -8,29 +8,31 @@ datasource db {
 }
 
 model User {
-  id                  String    @id @default(uuid())
-  telegramId          BigInt?   @unique
-  inviteToken         String?   @unique
-  name                String
-  roles               Role[]    @relation("UserRoles") 
-  timezone            String    @default("Asia/Bishkek")
-  workStart           String    @default("10:00") // HH:mm
-  workEnd             String    @default("19:00") // HH:mm
-  workDays            Int[]     @default([1, 2, 3, 4, 5]) // 1-ПН, 7-ВС
-  isActive            Boolean   @default(true)
-  isAdmin             Boolean   @default(false)
-  passwordHash        String?   
-  
+  id           String   @id @default(uuid())
+  telegramId   BigInt?  @unique
+  inviteToken  String?  @unique
+  name         String
+  roles        Role[]   @relation("UserRoles")
+  timezone     String   @default("Asia/Bishkek")
+  workStart    String   @default("10:00") // HH:mm
+  workEnd      String   @default("19:00") // HH:mm
+  workDays     Int[]    @default([1, 2, 3, 4, 5]) // 1-ПН, 7-ВС
+  isActive     Boolean  @default(true)
+  isAdmin      Boolean  @default(false)
+  passwordHash String?
+
   // Tracking
   lastMorningCheck    DateTime?
   lastEveningCheck    DateTime?
-  lastEveningReminder DateTime? // <-- НОВОЕ ПОЛЕ
+  lastEveningReminder DateTime?
 
-  projects            Project[]
-  tasks               Task[]
-  checkIns            CheckIn[]
-  customQuestions     Question[] @relation("UserCustomQuestions")
-  reports             Report[]
+  projects         Project[]
+  tasks            Task[]
+  checkIns         CheckIn[]
+  customQuestions  Question[]         @relation("UserCustomQuestions")
+  reports          Report[]
+  QuestionDelivery QuestionDelivery[]
+  answers          Answer[]           // <-- ДОБАВЛЕНО ЭТО ПОЛЕ
 }
 
 model Role {
@@ -41,13 +43,13 @@ model Role {
 }
 
 model Project {
-  id       String    @id @default(uuid())
-  name     String
-  isActive Boolean   @default(true)
-  tasksRequired  Boolean   @default(true)
-  users    User[]
-  tasks    Task[]
-  reports  Report[]  // <-- НОВАЯ СВЯЗЬ
+  id            String   @id @default(uuid())
+  name          String
+  isActive      Boolean  @default(true)
+  tasksRequired Boolean  @default(true)
+  users         User[]
+  tasks         Task[]
+  reports       Report[] // <-- НОВАЯ СВЯЗЬ
 }
 
 enum TaskStatus {
@@ -58,15 +60,15 @@ enum TaskStatus {
 }
 
 model Task {
-  id         String     @id @default(uuid())
-  title      String
-  projectId  String
-  project    Project    @relation(fields: [projectId], references: [id])
-  assigneeId String?
-  assignee   User?      @relation(fields: [assigneeId], references: [id])
-  status     TaskStatus @default(TODO)
-  deadline   DateTime?
-  acknowledgedAt DateTime? 
+  id             String     @id @default(uuid())
+  title          String
+  projectId      String
+  project        Project    @relation(fields: [projectId], references: [id])
+  assigneeId     String?
+  assignee       User?      @relation(fields: [assigneeId], references: [id])
+  status         TaskStatus @default(TODO)
+  deadline       DateTime?
+  acknowledgedAt DateTime?
 }
 
 enum QuestionType {
@@ -75,28 +77,61 @@ enum QuestionType {
   TIME
   YES_NO
   SELECT
+  MULTI_SELECT
 }
 
 enum CheckInTime {
   MORNING
   EVENING
   BOTH
+  CUSTOM
+}
+
+enum QuestionScheduleType {
+  CHECK_IN
+  EXACT_TIME
+  RECURRING
+}
+
+enum RecurrenceInterval {
+  DAILY
+  WEEKLY
 }
 
 model Question {
-  id            String       @id @default(uuid())
-  text          String
-  type          QuestionType
-  options       String[]     // Для типа SELECT
-  checkInTime   CheckInTime
-  isRequired    Boolean      @default(true)
-  
-  targetRoleId  String?
-  targetRole    Role?        @relation("RoleQuestions", fields: [targetRoleId], references: [id])
-  targetUserId  String?
-  targetUser    User?        @relation("UserCustomQuestions", fields: [targetUserId], references: [id])
-  
-  answers       Answer[]
+  id          String       @id @default(uuid())
+  text        String
+  type        QuestionType
+  options     String[] // Для типа SELECT
+  checkInTime CheckInTime
+  isRequired  Boolean      @default(true)
+  includeInReport Boolean      @default(true)
+
+  targetRoleId String?
+  targetRole   Role?   @relation("RoleQuestions", fields: [targetRoleId], references: [id])
+  targetUserId String?
+  targetUser   User?   @relation("UserCustomQuestions", fields: [targetUserId], references: [id])
+
+  answers Answer[]
+
+  scheduleType       QuestionScheduleType @default(CHECK_IN)
+  exactTime          DateTime?
+  recurrenceInterval RecurrenceInterval?
+  recurrenceTime     String? // "HH:mm"
+  recurrenceDay      Int? // 1-7 (для еженедельных)
+
+  deliveries QuestionDelivery[]
+}
+
+model QuestionDelivery {
+  id         String   @id @default(uuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([questionId, userId])
 }
 
 model CheckIn {
@@ -109,12 +144,17 @@ model CheckIn {
 }
 
 model Answer {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   checkInId  String
-  checkIn    CheckIn  @relation(fields: [checkInId], references: [id])
-  questionId String?  
+  checkIn    CheckIn   @relation(fields: [checkInId], references: [id])
+
+  userId     String?  // <-- НОВОЕ ПОЛЕ (Прямая привязка к юзеру)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  questionId String?
   question   Question? @relation(fields: [questionId], references: [id])
-  value      String   // Храним ответ как строку (для YES_NO - "yes"/"no", для массива - JSON.stringify)
+  value      String // Храним ответ как строку (для YES_NO - "yes"/"no", для массива - JSON.stringify)
+  createdAt  DateTime @default(now())
 }
 
 model Report {

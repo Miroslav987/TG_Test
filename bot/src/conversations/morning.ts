@@ -1,6 +1,7 @@
 import { Conversation } from "@grammyjs/conversations";
 import { InlineKeyboard } from "grammy";
 import { MyContext, prisma } from "../index";
+import { askQuestionHelper } from "../utils/questions";
 
 export async function morningConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
   // ДОБАВЛЕНО: include: { roles: true }
@@ -31,24 +32,11 @@ export async function morningConversation(conversation: Conversation<MyContext>,
 
 
   // 1. Задаем кастомные вопросы
-  for (const q of questions) {
-    if (q.type === "YES_NO") {
-      const kb = new InlineKeyboard().text("✅ Да", "yes").text("❌ Нет", "no");
-      await ctx.reply(q.text, { reply_markup: kb });
-      const answerCtx = await conversation.waitForCallbackQuery(["yes", "no"]);
-      await answerCtx.answerCallbackQuery();
-      
-      await conversation.external(() => 
-        prisma.answer.create({ data: { checkInId: checkIn.id, questionId: q.id, value: answerCtx.match } })
-      );
-    } else {
-      // Для текста, чисел и т.д.
-      await ctx.reply(q.text);
-      const answerCtx = await conversation.waitFor("message:text");
-      await conversation.external(() => 
-        prisma.answer.create({ data: { checkInId: checkIn.id, questionId: q.id, value: answerCtx.message!.text } })
-      );
-    }
+ for (const q of questions) {
+    const answerVal = await askQuestionHelper(conversation, ctx, q);
+    await conversation.external(() => 
+      prisma.answer.create({ data: { checkInId: checkIn.id, questionId: q.id, value: answerVal } })
+    );
   }
 
   // 2. Выбор проекта
@@ -62,7 +50,7 @@ export async function morningConversation(conversation: Conversation<MyContext>,
   
   await ctx.reply("Над каким проектом сегодня работаешь?", { reply_markup: projectKb });
    const projCtx = await conversation.waitForCallbackQuery(/proj_.+/);
-  const projectId = projCtx.match.split("_")[1];
+  const projectId = projCtx.callbackQuery!.data.replace("proj_", "");
   await projCtx.answerCallbackQuery();
 
   // Подгружаем проект, чтобы узнать, нужны ли таски
@@ -86,7 +74,8 @@ export async function morningConversation(conversation: Conversation<MyContext>,
       const taskCtx = await conversation.waitForCallbackQuery(/task_.+/);
       await taskCtx.answerCallbackQuery();
 
-      if (taskCtx.match === "task_custom") {
+      // Проверяем data вместо match
+      if (taskCtx.callbackQuery!.data === "task_custom") {
         await ctx.reply("Кратко опиши свою задачу на сегодня:");
         const customCtx = await conversation.waitFor("message:text");
         // СОЗДАЁМ НАСТОЯЩУЮ ЗАДАЧУ

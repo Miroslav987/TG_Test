@@ -1,6 +1,7 @@
 import { Conversation } from "@grammyjs/conversations";
 import { InlineKeyboard } from "grammy";
 import { MyContext, prisma } from "../index";
+import { askQuestionHelper } from "../utils/questions";
 
 export async function eveningConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
   // ДОБАВЛЕНО: include: { roles: true }
@@ -64,14 +65,12 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
     })
   )
 
-  for (const q of questions) {
-    await ctx.reply(q.text); // Упрощенно ждем текст, для масштабируемости можно добавить кнопки как утром
-    const answerCtx = await conversation.waitFor("message:text");
+for (const q of questions) {
+    const answerVal = await askQuestionHelper(conversation, ctx, q);
     await conversation.external(() => 
-      prisma.answer.create({ data: { checkInId: checkIn.id, questionId: q.id, value: answerCtx.message!.text } })
+      prisma.answer.create({ data: { checkInId: checkIn.id, questionId: q.id, value: answerVal } })
     );
   }
-
   await ctx.reply("Как в целом прошел день? (свободный итог)");
   const summaryCtx = await conversation.waitFor("message:text");
   await conversation.external(() => 

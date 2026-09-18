@@ -1,24 +1,16 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link"; // <-- ДОБАВЛЕНО
 import QuestionForm from "./QuestionForm";
 import { deleteQuestion } from "../actions/questions";
 
-// Хелперы перенесены сюда
 const getTargetLabel = (q: any) => {
   if (q.targetRole) return <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">Роль: {q.targetRole.name}</span>;
   if (q.targetUser) return <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs">Перс: {q.targetUser.name}</span>;
   return <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Общий</span>;
 };
 
-const getTimeLabel = (time: string) => {
-  switch (time) {
-    case "MORNING": return "🌅 Утро";
-    case "EVENING": return "🌆 Вечер";
-    default: return "Утро и Вечер";
-  }
-};
-
-export default function QuestionItem({ q, roles, users }: any) {
+export default function QuestionItem({ q, roles, users, }: any) {
   const [isEditing, setIsEditing] = useState(false);
 
   if (isEditing) {
@@ -34,13 +26,20 @@ export default function QuestionItem({ q, roles, users }: any) {
       <div className="flex justify-between items-start mb-2">
         <div>
           <strong className="block mb-1">{q.text}</strong>
-          <div className="flex gap-2 text-sm text-gray-500 flex-wrap">
+          <div className="flex gap-2 text-sm text-gray-500 flex-wrap mt-1">
             <span>Тип: <b className="font-medium">{q.type}</b></span>
-            {q.type === "SELECT" && <span className="text-xs">({q.options.join(", ")})</span>}
+            {(q.type === "SELECT" || q.type === "MULTI_SELECT") && <span className="text-xs">({q.options.join(", ")})</span>}
             <span>|</span>
-            <span>Время: {getTimeLabel(q.checkInTime)}</span>
+            
+            {q.scheduleType === "EXACT_TIME" && <span>📅 Разово: {new Date(q.exactTime).toLocaleString('ru-RU')}</span>}
+            {q.scheduleType === "RECURRING" && <span>🔄 Циклично: {q.recurrenceInterval === "DAILY" ? "Ежедневно" : `Еженедельно (день ${q.recurrenceDay})`} в {q.recurrenceTime}</span>}
+            
             <span>|</span>
             <span>{q.isRequired ? "Обязательный" : "Опциональный"}</span>
+            <span>|</span>
+            <span className={q.includeInReport ? "text-purple-600 font-medium" : "text-gray-400 line-through"}>
+              {q.includeInReport ? "В отчёте" : "Не в отчёте"}
+            </span>
           </div>
         </div>
         <div>
@@ -48,7 +47,12 @@ export default function QuestionItem({ q, roles, users }: any) {
         </div>
       </div>
       
-      <div className="flex justify-start gap-4 text-xs mt-2 border-t pt-2">
+      <div className="flex justify-start items-center gap-4 text-xs mt-2 border-t pt-3">
+        {/* НОВАЯ ССЫЛКА НА ИСТОРИЮ */}
+        <Link href={`/questions/${q.id}`} className="text-purple-600 hover:underline font-medium">
+          📊 История ответов
+        </Link>
+        <span className="text-gray-300">|</span>
         <button onClick={() => setIsEditing(true)} className="text-blue-600 hover:underline">
           ✏️ Изменить
         </button>

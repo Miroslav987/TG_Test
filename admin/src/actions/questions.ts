@@ -2,15 +2,24 @@
 import { prisma } from "@standup/shared";
 import { revalidatePath } from "next/cache";
 
-// Функция парсинга повторяется, выносим общую логику
 function extractQuestionData(formData: FormData) {
   const text = formData.get("text") as string;
   const type = formData.get("type") as any;
-  const checkInTime = formData.get("checkInTime") as any;
   const isRequired = formData.get("isRequired") === "on";
+  const includeInReport = formData.get("includeInReport") === "on";
+
+  // По умолчанию теперь RECURRING, убрали CHECK_IN
+  const scheduleType = formData.get("scheduleType") as any || "RECURRING";
+  
+  const exactTimeStr = formData.get("exactTime") as string;
+  const exactTime = (scheduleType === "EXACT_TIME" && exactTimeStr) ? new Date(exactTimeStr) : null;
+  
+  const recurrenceInterval = (scheduleType === "RECURRING" ? formData.get("recurrenceInterval") as any : null);
+  const recurrenceTime = (scheduleType === "RECURRING" ? formData.get("recurrenceTime") as string : null);
+  const recurrenceDay = (scheduleType === "RECURRING" && formData.get("recurrenceDay")) ? Number(formData.get("recurrenceDay")) : null;
 
   let options: string[] = [];
-  if (type === "SELECT") {
+  if (type === "SELECT" || type === "MULTI_SELECT") {
     const optsString = formData.get("options") as string;
     options = optsString ? optsString.split(",").map(s => s.trim()).filter(Boolean) : [];
   }
@@ -19,7 +28,10 @@ function extractQuestionData(formData: FormData) {
   const targetRoleId = targetType === "ROLE" ? formData.get("targetRoleId") as string : null;
   const targetUserId = targetType === "USER" ? formData.get("targetUserId") as string : null;
 
-  return { text, type, checkInTime, isRequired, options, targetRoleId, targetUserId };
+  return { 
+    text, type, isRequired, includeInReport, options, targetRoleId, targetUserId,
+    scheduleType, exactTime, recurrenceInterval, recurrenceTime, recurrenceDay
+  };
 }
 
 export async function createQuestion(formData: FormData) {
