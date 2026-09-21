@@ -14,7 +14,7 @@ COPY shared/package.json ./shared/
 COPY bot/package.json ./bot/
 COPY admin/package.json ./admin/
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 COPY . .
 
