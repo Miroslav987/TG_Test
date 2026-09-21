@@ -2,9 +2,11 @@ import { prisma } from "@standup/shared";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-export default async function QuestionHistoryPage({ params }: { params: { id: string } }) {
+export default async function QuestionHistoryPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
   const question = await prisma.question.findUnique({
-    where: { id: params.id },
+    where: { id },
     include: {
       answers: {
         include: {
