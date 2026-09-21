@@ -1,17 +1,16 @@
 import { Conversation } from "@grammyjs/conversations";
 import { InlineKeyboard } from "grammy";
 import { MyContext } from "../index";
+import { MENU_TRIGGERS } from "../index";
 
 export async function askQuestionHelper(conversation: Conversation<MyContext>, ctx: MyContext, q: any): Promise<string> {
   if (q.type === "YES_NO") {
     const kb = new InlineKeyboard().text("✅ Да", "yes").text("❌ Нет", "no");
-    // Сохраняем msg для удаления кнопок
     const msg = await ctx.reply(q.text, { reply_markup: kb });
     const resp = await conversation.waitForCallbackQuery(["yes", "no"]);
     
-    // Убираем инлайн-клавиатуру, заменяя её на пустую
     await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msg.message_id, { reply_markup: new InlineKeyboard() });
-    await resp.answerCallbackQuery();
+    try { await resp.answerCallbackQuery(); } catch (e) {}
     return resp.match === "yes" ? "Да" : "Нет";
   } 
   else if (q.type === "SELECT") {
@@ -23,7 +22,7 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
     await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msg.message_id, { reply_markup: new InlineKeyboard() });
     
     const idx = parseInt(resp.callbackQuery.data.replace("sel_", ""));
-    await resp.answerCallbackQuery();
+    try { await resp.answerCallbackQuery(); } catch (e) {}
     return q.options[idx];
   }
   else if (q.type === "MULTI_SELECT") {
@@ -48,20 +47,19 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
       const data = resp.callbackQuery.data;
       
       if (data === "submit_multi") {
-        // Убираем кнопки после нажатия "Готово"
         await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msgId, { reply_markup: new InlineKeyboard() });
-        await resp.answerCallbackQuery();
+        try { await resp.answerCallbackQuery(); } catch (e) {}
         break;
       } else {
         const idx = parseInt(data.replace("msel_", ""));
         const opt = q.options[idx];
         if (selected.includes(opt)) {
-          selected = selected.filter(x => x !== opt); // Снимаем галочку
+          selected = selected.filter(x => x !== opt);
         } else {
-          selected.push(opt); // Ставим галочку
+          selected.push(opt);
         }
         
-        await resp.answerCallbackQuery();
+        try { await resp.answerCallbackQuery(); } catch (e) {}
         await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msgId, { reply_markup: buildKb() });
       }
     }
@@ -71,6 +69,13 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
     // TEXT, NUMBER, TIME
     await ctx.reply(q.text);
     const resp = await conversation.waitFor("message:text");
+    
+    // ПРОВЕРКА НА ТРИГГЕРЫ МЕНЮ ВНУТРИ ХЕЛПЕРА
+    if (resp.message?.text && MENU_TRIGGERS.includes(resp.message.text)) {
+      await ctx.reply("Отменил текущее действие. Нажми на кнопку ещё раз, чтобы начать заново 👆");
+      return "_CANCEL_";
+    }
+
     return resp.message!.text!.trim();
   }
 }

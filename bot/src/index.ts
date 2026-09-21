@@ -9,9 +9,10 @@ import { newTaskConversation } from "./conversations/newTask";
 import { newProjectConversation } from "./conversations/newProject";
 import { editTaskConversation } from "./conversations/editTask";
 import { customQuestionConversation } from "./conversations/customQuestion";
-import { prisma } from "@standup/shared";
 import { eveningConversation } from "./conversations/evening";
 import { morningConversation } from "./conversations/morning";
+
+import { prisma } from "@standup/shared";
 
 export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
@@ -27,13 +28,19 @@ bot.use(createConversation(customQuestionConversation, "customQuestion"));
 bot.use(createConversation(morningConversation, "morning")); // <--- Регистрация
 bot.use(createConversation(eveningConversation, "evening"));
 
-// === СОЗДАЕМ ПОСТОЯННОЕ ГЛАВНОЕ МЕНЮ ===
+
+// === ЭКСПОРТ ТРИГГЕРОВ МЕНЮ ===
+export const MENU_TRIGGERS = [
+  "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", 
+  "/newtask", "/newproject", "/mytasks", "/start", "/menu"
+];
+
 export const mainMenuKeyboard = new Keyboard()
   .text("➕ Новая задача").text("📂 Новый проект").row()
   .text("📋 Мои задачи").row()
   .text("❓ Помощь")
   .resized()
-  .persistent(); // <-- Меню не будет сворачиваться само
+  .persistent();
 
 // Команда /start
 bot.command("start", async (ctx) => {
@@ -60,7 +67,6 @@ bot.command("start", async (ctx) => {
   });
 });
 
-// === НОВЫЕ КОМАНДЫ ДЛЯ МЕНЮ ===
 bot.command("menu", async (ctx) => {
   await ctx.reply("Вот меню 👇", { reply_markup: mainMenuKeyboard });
 });
@@ -76,7 +82,6 @@ bot.hears("❓ Помощь", async (ctx) => {
   );
 });
 
-// Алиасы для действий
 bot.hears("➕ Новая задача", async (ctx) => ctx.conversation.enter("newTask"));
 bot.command("newtask", async (ctx) => ctx.conversation.enter("newTask"));
 
@@ -120,20 +125,20 @@ const myTasksHandler = async (ctx: MyContext) => {
 bot.hears("📋 Мои задачи", myTasksHandler);
 bot.command("mytasks", myTasksHandler);
 
-// Обработчики инлайн-кнопок
+// === ЗАЩИЩЕННЫЕ ОБРАБОТЧИКИ CALLBACK_QUERY ===
 bot.callbackQuery("start_morning", async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел, игнорирую:", e); }
   await ctx.conversation.enter("morning");
 });
 
 bot.callbackQuery("start_evening", async (ctx) => {
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел, игнорирую:", e); }
   await ctx.conversation.enter("evening");
 });
 
 bot.callbackQuery(/^ans_custom_(.+)$/, async (ctx) => {
   ctx.session.customQuestionId = ctx.match[1];
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел, игнорирую:", e); }
   await ctx.conversation.enter("customQuestion");
 });
 
@@ -141,12 +146,13 @@ bot.callbackQuery(/^ack_task_.+/, async (ctx) => {
   const taskId = ctx.callbackQuery.data.replace("ack_task_", "");
   try {
     await prisma.task.update({ where: { id: taskId }, data: { acknowledgedAt: new Date() } });
-    await ctx.answerCallbackQuery("Принято!");
+    try { await ctx.answerCallbackQuery("Принято!"); } catch (e) { console.log("Callback устарел, игнорирую:", e); }
+    
     const text = ctx.callbackQuery.message?.text || "📌 Задача";
     const dateStr = new Date().toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
     await ctx.editMessageText(`${text}\n\n✅ Принято ${dateStr}`);
   } catch (error) {
-    await ctx.answerCallbackQuery({ text: "Ошибка", show_alert: true });
+    try { await ctx.answerCallbackQuery({ text: "Ошибка", show_alert: true }); } catch (e) { console.log("Callback устарел, игнорирую:", e); }
   }
 });
 
@@ -154,30 +160,25 @@ bot.callbackQuery(/^delete_task_(.+)$/, async (ctx) => {
   const id = ctx.match[1];
   try {
     await prisma.task.delete({ where: { id } });
-    await ctx.answerCallbackQuery("Задача удалена");
+    try { await ctx.answerCallbackQuery("Задача удалена"); } catch (e) { console.log("Callback устарел, игнорирую:", e); }
     await ctx.deleteMessage(); 
   } catch (error) {
-    await ctx.answerCallbackQuery({ text: "Ошибка удаления", show_alert: true });
+    try { await ctx.answerCallbackQuery({ text: "Ошибка удаления", show_alert: true }); } catch (e) { console.log("Callback устарел, игнорирую:", e); }
   }
 });
 
 bot.callbackQuery(/^edit_task_(.+)$/, async (ctx) => {
   const id = ctx.match[1];
   ctx.session.editTaskId = id;
-  await ctx.answerCallbackQuery();
+  try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел, игнорирую:", e); }
   await ctx.conversation.enter("editTask");
 });
 
-// CATCH-ALL ОБНОВЛЕН
 bot.on("message:text", async (ctx) => {
   await ctx.reply(
     "Не понял тебя 🙂\n\nВоспользуйся кнопками внизу экрана или командами:\n/newtask — добавить задачу\n/newproject — создать проект\n/mytasks — посмотреть список задач\n\nЕсли ждёшь чек-ин — дождись сообщения от меня по расписанию.",
-    { reply_markup: mainMenuKeyboard } // Прикрепляем клавиатуру, если её нет
+    { reply_markup: mainMenuKeyboard }
   );
-});
-
-bot.catch((err) => {
-  console.error("Ошибка в работе бота:", err);
 });
 
 bot.start({
