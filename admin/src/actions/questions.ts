@@ -1,6 +1,7 @@
 "use server";
 import { prisma } from "@standup/shared";
 import { revalidatePath } from "next/cache";
+import { fromZonedTime } from "date-fns-tz"; // В версии v3 используется fromZonedTime (в старых - zonedTimeToUtc)
 
 function extractQuestionData(formData: FormData) {
   const text = formData.get("text") as string;
@@ -8,11 +9,13 @@ function extractQuestionData(formData: FormData) {
   const isRequired = formData.get("isRequired") === "on";
   const includeInReport = formData.get("includeInReport") === "on";
 
-  // По умолчанию теперь RECURRING, убрали CHECK_IN
   const scheduleType = formData.get("scheduleType") as any || "RECURRING";
   
   const exactTimeStr = formData.get("exactTime") as string;
-  const exactTime = (scheduleType === "EXACT_TIME" && exactTimeStr) ? new Date(exactTimeStr) : null;
+  // ПРАВИЛЬНАЯ КОНВЕРТАЦИЯ В UTC С УЧЁТОМ ТАЙМЗОНЫ BISHKEK
+  const exactTime = (scheduleType === "EXACT_TIME" && exactTimeStr) 
+    ? fromZonedTime(exactTimeStr, "Asia/Bishkek") 
+    : null;
   
   const recurrenceInterval = (scheduleType === "RECURRING" ? formData.get("recurrenceInterval") as any : null);
   const recurrenceTime = (scheduleType === "RECURRING" ? formData.get("recurrenceTime") as string : null);

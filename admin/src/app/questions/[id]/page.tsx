@@ -2,18 +2,9 @@ import { prisma } from "@standup/shared";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-export default async function QuestionHistoryPage({ 
-  params 
-}: { 
-  params: Promise<{ id: string }> 
-}) {
-  const resolvedParams = await params;
-  const id = resolvedParams?.id;
-
-  if (!id) notFound();
-
+export default async function QuestionHistoryPage({ params }: { params: { id: string } }) {
   const question = await prisma.question.findUnique({
-    where: { id },
+    where: { id: params.id },
     include: {
       answers: {
         include: {
@@ -27,91 +18,134 @@ export default async function QuestionHistoryPage({
 
   if (!question) notFound();
 
-  // Группировка ответов по дате и пользователю
-  type AnswerType = (typeof question.answers)[number];
-  
-  const groupedAnswers = question.answers.reduce((acc, answer) => {
-    const dateObj = new Date(answer.createdAt || answer.checkIn?.createdAt || new Date());
-    
-    // Ключ даты для группировки (например, "17 сентября 2026")
-    const dateKey = dateObj.toLocaleDateString("ru-RU", { 
-      day: 'numeric', 
-      month: 'long', 
-      year: 'numeric' 
+  // 1. ОПРЕДЕЛЯЕМ АУДИТОРИЮ (ЦЕЛЕВЫХ ПОЛЬЗОВАТЕЛЕЙ)
+  let targetUsers: any[] = [];
+  if (question.targetUserId) {
+    targetUsers = await prisma.user.findMany({
+      where: { id: question.targetUserId, isActive: true },
+      orderBy: { name: 'asc' }
     });
-    
-    const userName = answer.user?.name || answer.checkIn?.user?.name || "Неизвестно";
-    const groupKey = `${dateKey}_${userName}`;
-
-    if (!acc[groupKey]) {
-      acc[groupKey] = {
-        dateStr: dateKey,
-        userName,
-        items: []
-      };
-    }
-
-    acc[groupKey].items.push({
-      ...answer,
-      timeStr: dateObj.toLocaleTimeString("ru-RU", { hour: '2-digit', minute: '2-digit' })
+  } else if (question.targetRoleId) {
+    targetUsers = await prisma.user.findMany({
+      where: { roles: { some: { id: question.targetRoleId } }, isActive: true },
+      orderBy: { name: 'asc' }
     });
+  } else {
+    // Общий вопрос — для всех активных
+    targetUsers = await prisma.user.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' }
+    });
+  }
 
-    return acc;
-  }, {} as Record<string, { dateStr: string; userName: string; items: (AnswerType & { timeStr: string })[] }>);
-
-  const groups = Object.values(groupedAnswers);
+  // 2. СОБИРАЕМ СТАТИСТИКУ (ДОСТАВКА И ПОСЛЕДНИЙ ОТВЕТ)
+  const audienceStats = await Promise.all(targetUsers.map(async (user) => {
+    const lastDelivery = await prisma.questionDelivery.findFirst({
+      where: { questionId: question.id, userId: user.id },
+      orderBy: { createdAt: 'desc' }
+    });
+    const lastAnswer = await prisma.answer.findFirst({
+      where: { questionId: question.id, userId: user.id },
+      orderBy: { createdAt: 'desc' }
+    });
+    return { user, lastDelivery, lastAnswer };
+  }));
 
   return (
-    <div className="max-w-4xl mx-auto py-4">
+    <div>
       <div className="mb-6">
-        <Link href="/questions" className="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
-          ← Назад к вопросам
-        </Link>
+        <Link href="/questions" className="text-blue-600 hover:underline">← Назад к вопросам</Link>
       </div>
       
-      <h1 className="text-3xl font-bold mb-8 text-gray-900 tracking-tight">{question.text}</h1>
+      <h1 className="text-2xl font-bold mb-6 text-gray-900">{question.text}</h1>
       
-      {groups.length === 0 ? (
-        <div className="bg-white p-8 rounded-xl border border-gray-200 text-center text-gray-500 shadow-sm">
-          Пока никто не ответил на этот вопрос.
-        </div>
+      {/* ТАБЛИЦА: ИСТОРИЯ ОТВЕТОВ */}
+      <h2 className="text-xl font-bold mb-4 text-gray-900">Лента ответов</h2>
+      {question.answers.length === 0 ? (
+        <p className="text-gray-500 bg-white p-6 rounded-lg border mb-12">Пока никто не ответил на этот вопрос.</p>
       ) : (
-        <div className="space-y-6">
-          {groups.map((group, idx) => (
-            <div key={idx} className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden transition-all hover:shadow-md">
-              {/* Шапка карточки дня */}
-              <div className="bg-gray-50/80 px-6 py-3.5 border-b border-gray-200 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="font-semibold text-gray-900">{group.dateStr}</span>
-                  <span className="text-xs bg-gray-200 text-gray-700 px-2.5 py-0.5 rounded-full font-medium">
-                    {group.items.length} {group.items.length === 1 ? 'ответ' : 'ответа'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Сотрудник:</span>
-                  <span className="text-sm font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-lg border border-blue-100">
-                    {group.userName}
-                  </span>
-                </div>
-              </div>
-
-              {/* Список ответов за этот день */}
-              <div className="divide-y divide-gray-100 px-6">
-                {group.items.map((item) => (
-                  <div key={item.id} className="py-4 flex gap-4 items-start group/item">
-                    <span className="text-xs font-mono font-medium text-gray-400 bg-gray-100 px-2 py-1 rounded mt-0.5 select-none">
-                      {item.timeStr}
-                    </span>
-                    <p className="text-gray-800 text-sm leading-relaxed whitespace-pre-wrap flex-1 pt-0.5">
-                      {item.value}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+        <div className="bg-white border rounded-lg shadow-sm overflow-hidden mb-12">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="p-4 font-medium text-gray-700 w-1/4">Дата</th>
+                <th className="p-4 font-medium text-gray-700 w-1/4">Сотрудник</th>
+                <th className="p-4 font-medium text-gray-700 w-1/2">Ответ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {question.answers.map(answer => {
+                const dateVal = answer.createdAt || answer.checkIn?.createdAt || new Date();
+                const formattedDate = new Date(dateVal).toLocaleString("ru-RU", { 
+                  day: '2-digit', month: '2-digit', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit'
+                });
+                
+                const userName = answer.user?.name || answer.checkIn?.user?.name || "Неизвестно";
+                
+                return (
+                  <tr key={answer.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="p-4 text-sm text-gray-500 whitespace-nowrap align-top">{formattedDate}</td>
+                    <td className="p-4 text-sm font-medium text-gray-900 align-top">{userName}</td>
+                    <td className="p-4 text-sm text-gray-800 whitespace-pre-wrap align-top">{answer.value}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
+
+      {/* ТАБЛИЦА: КОМУ ОТПРАВЛЕНО */}
+      <h2 className="text-xl font-bold mb-4 text-gray-900">Аудитория опроса (Кому назначено)</h2>
+      <div className="bg-white border rounded-lg shadow-sm overflow-hidden mb-8">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-gray-50 border-b">
+            <tr>
+              <th className="p-4 font-medium text-gray-700 w-1/4">Имя сотрудника</th>
+              <th className="p-4 font-medium text-gray-700 w-1/4">Последняя отправка</th>
+              <th className="p-4 font-medium text-gray-700 w-1/2">Последний ответ</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {audienceStats.map(stat => {
+              const deliveryDate = stat.lastDelivery 
+                ? new Date(stat.lastDelivery.createdAt).toLocaleString("ru-RU", { 
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                  })
+                : "ещё не отправлялся";
+                
+              const answerDate = stat.lastAnswer
+                ? new Date(stat.lastAnswer.createdAt).toLocaleString("ru-RU", { 
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit'
+                  })
+                : null;
+                
+              const answerText = stat.lastAnswer 
+                ? `${answerDate} — ${stat.lastAnswer.value.length > 50 ? stat.lastAnswer.value.substring(0, 50) + '...' : stat.lastAnswer.value}`
+                : "нет ответа";
+
+              return (
+                <tr key={stat.user.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="p-4 text-sm font-medium text-gray-900 align-top">{stat.user.name}</td>
+                  <td className="p-4 text-sm text-gray-500 align-top">{deliveryDate}</td>
+                  <td className="p-4 text-sm text-gray-800 align-top">{answerText}</td>
+                </tr>
+              );
+            })}
+            
+            {audienceStats.length === 0 && (
+              <tr>
+                <td colSpan={3} className="p-4 text-sm text-gray-500 text-center">
+                  Нет активных пользователей, подходящих под критерии.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
