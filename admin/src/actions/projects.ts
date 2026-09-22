@@ -83,3 +83,45 @@ export async function deleteProject(formData: FormData) {
   }
   revalidatePath("/projects");
 }
+
+export async function removeUserFromProject(formData: FormData) {
+  const projectId = formData.get("projectId") as string;
+  const userId = formData.get("userId") as string;
+  
+  if (projectId && userId) {
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { users: { disconnect: { id: userId } } }
+    });
+    revalidatePath("/projects");
+  }
+}
+
+export async function updateTask(formData: FormData) {
+  const taskId = formData.get("taskId") as string;
+  const title = formData.get("title") as string;
+  const assigneeId = formData.get("assigneeId") as string;
+  const deadlineStr = formData.get("deadline") as string;
+  const status = formData.get("status") as any;
+
+  if (taskId) {
+    await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        title,
+        assigneeId: assigneeId || null,
+        deadline: deadlineStr ? new Date(deadlineStr) : null,
+        status
+      }
+    });
+    revalidatePath("/projects");
+  }
+}
+
+export async function deleteTask(formData: FormData) {
+  const taskId = formData.get("taskId") as string;
+  if (taskId) {
+    await prisma.task.delete({ where: { id: taskId } });
+    revalidatePath("/projects");
+  }
+}
