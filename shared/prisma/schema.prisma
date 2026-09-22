@@ -110,6 +110,8 @@ model Question {
   isRequired  Boolean      @default(true)
   includeInReport Boolean      @default(true)
   remindUntilAnswered Boolean      @default(false)
+  
+  createdAt           DateTime     @default(now())
 
   targetRoleId String?
   targetRole   Role?   @relation("RoleQuestions", fields: [targetRoleId], references: [id])
