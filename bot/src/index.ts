@@ -10,8 +10,10 @@ import { newProjectConversation } from "./conversations/newProject";
 import { editTaskConversation } from "./conversations/editTask";
 import { customQuestionConversation } from "./conversations/customQuestion";
 import { pauseConversation } from "./conversations/pause";
-import { newQuestionConversation } from "./conversations/newQuestion"; // <-- ДОБАВЛЕНО
 import { prisma, sendTelegramMessage } from "@standup/shared";
+import { newQuestionConversation } from "./conversations/newQuestion";
+import { morningConversation } from "./conversations/morning";
+import { eveningConversation } from "./conversations/evening";
 
 export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
@@ -26,6 +28,8 @@ bot.use(createConversation(customQuestionConversation, "customQuestion"));
 bot.use(createConversation(pauseConversation, "pause"));
 bot.use(createConversation(newQuestionConversation, "newQuestion")); // <-- ДОБАВЛЕНО
 
+bot.use(createConversation(morningConversation, "morning"));
+bot.use(createConversation(eveningConversation, "evening"));
 // ОБНОВЛЁННЫЕ ТРИГГЕРЫ МЕНЮ
 export const MENU_TRIGGERS = [
   "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", "🆕 Новый вопрос",
