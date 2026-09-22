@@ -29,10 +29,13 @@ export async function newQuestionConversation(conversation: Conversation<MyConte
     .text("Да-Нет", "YES_NO").text("Один вариант", "SELECT").row()
     .text("Несколько вариантов", "MULTI_SELECT");
     
-  await ctx.reply("Тип ответа?", { reply_markup: typeKb });
+  const typeMsg = await ctx.reply("Тип ответа?", { reply_markup: typeKb });
   const typeCtx = await conversation.waitForCallbackQuery(["TEXT", "NUMBER", "YES_NO", "SELECT", "MULTI_SELECT"]);
   const type = typeCtx.match;
   try { await typeCtx.answerCallbackQuery(); } catch (e) {}
+  
+  // Убираем сообщение с кнопками после выбора
+  await ctx.api.deleteMessage(ctx.chat!.id, typeMsg.message_id).catch(() => {});
 
   let options: string[] = [];
   if (type === "SELECT" || type === "MULTI_SELECT") {
@@ -51,10 +54,12 @@ export async function newQuestionConversation(conversation: Conversation<MyConte
     .text("Каждый день в это же время", "DAILY").row()
     .text("Каждую неделю в этот день и время", "WEEKLY");
     
-  await ctx.reply("Когда отправлять?", { reply_markup: schedKb });
+  const schedMsg = await ctx.reply("Когда отправлять?", { reply_markup: schedKb });
   const schedCtx = await conversation.waitForCallbackQuery(["EXACT_TIME", "DAILY", "WEEKLY"]);
   const scheduleChoice = schedCtx.match;
   try { await schedCtx.answerCallbackQuery(); } catch (e) {}
+  
+  await ctx.api.deleteMessage(ctx.chat!.id, schedMsg.message_id).catch(() => {});
 
   let scheduleType: "EXACT_TIME" | "RECURRING" = "RECURRING";
   let exactTime: Date | null = null;
@@ -78,7 +83,6 @@ export async function newQuestionConversation(conversation: Conversation<MyConte
     recurrenceTime = timeCtx.message.text.trim();
     
     if (recurrenceInterval === "WEEKLY") {
-      // День недели в локальной таймзоне на момент создания
       recurrenceDay = parseInt(formatInTimeZone(new Date(), "Asia/Bishkek", "i"));
     }
   }
@@ -87,10 +91,12 @@ export async function newQuestionConversation(conversation: Conversation<MyConte
   const targetKb = new InlineKeyboard()
     .text("Всем", "GENERAL").text("По роли", "ROLE").text("Одному человеку", "USER");
     
-  await ctx.reply("Кому адресовать?", { reply_markup: targetKb });
+  const targetMsg = await ctx.reply("Кому адресовать?", { reply_markup: targetKb });
   const targetCtx = await conversation.waitForCallbackQuery(["GENERAL", "ROLE", "USER"]);
   const targetTypeStr = targetCtx.match;
   try { await targetCtx.answerCallbackQuery(); } catch (e) {}
+  
+  await ctx.api.deleteMessage(ctx.chat!.id, targetMsg.message_id).catch(() => {});
 
   let targetRoleId: string | null = null;
   let targetUserId: string | null = null;
@@ -100,28 +106,37 @@ export async function newQuestionConversation(conversation: Conversation<MyConte
     const rKb = new InlineKeyboard();
     roles.forEach((r: any) => rKb.text(r.name, `role_${r.id}`).row());
     
-    await ctx.reply("Выберите роль:", { reply_markup: rKb });
+    const roleMsg = await ctx.reply("Выберите роль:", { reply_markup: rKb });
     const rCtx = await conversation.waitForCallbackQuery(/role_.+/);
-    targetRoleId = rCtx.match.replace("role_", "");
+    
+    // ИСПРАВЛЕННЫЙ БАГ: берем data напрямую, так как match возвращает массив
+    targetRoleId = rCtx.callbackQuery!.data.replace("role_", "");
+    
     try { await rCtx.answerCallbackQuery(); } catch (e) {}
+    await ctx.api.deleteMessage(ctx.chat!.id, roleMsg.message_id).catch(() => {});
   } 
   else if (targetTypeStr === "USER") {
     const users = await conversation.external(() => prisma.user.findMany({ where: { isActive: true } }));
     const uKb = new InlineKeyboard();
     users.forEach((u: any) => uKb.text(u.name, `user_${u.id}`).row());
     
-    await ctx.reply("Выберите сотрудника:", { reply_markup: uKb });
+    const userMsg = await ctx.reply("Выберите сотрудника:", { reply_markup: uKb });
     const uCtx = await conversation.waitForCallbackQuery(/user_.+/);
-    targetUserId = uCtx.match.replace("user_", "");
+    
+    // ИСПРАВЛЕННЫЙ БАГ: берем data напрямую
+    targetUserId = uCtx.callbackQuery!.data.replace("user_", "");
+    
     try { await uCtx.answerCallbackQuery(); } catch (e) {}
+    await ctx.api.deleteMessage(ctx.chat!.id, userMsg.message_id).catch(() => {});
   }
 
   // 5. Флаги и параметры
   const askYesNo = async (question: string) => {
     const kb = new InlineKeyboard().text("Да", "yes").text("Нет", "no");
-    await ctx.reply(question, { reply_markup: kb });
+    const msg = await ctx.reply(question, { reply_markup: kb });
     const r = await conversation.waitForCallbackQuery(["yes", "no"]);
     try { await r.answerCallbackQuery(); } catch (e) {}
+    await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
     return r.match === "yes";
   };
 
