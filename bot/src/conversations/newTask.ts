@@ -21,7 +21,7 @@ export async function newTaskConversation(conversation: Conversation<MyContext>,
     user.projects.forEach(p => projectKb.text(p.name, `proj_${p.id}`).row());
     
     // ДОБАВЛЕНО: Кнопка "Без проекта"
-    projectKb.text("🙋 Без проекта (личная задача)", "task_no_project").row();
+    projectKb.text("Мои таски (без проекта)", "task_no_project").row();
     
     await ctx.reply("Для какого проекта задача?", { reply_markup: projectKb });
     

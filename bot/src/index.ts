@@ -112,6 +112,10 @@ bot.command("unpause", async (ctx) => {
   await ctx.reply("✅ Пауза снята, снова на связи.", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
 });
 
+bot.command("testevening", async (ctx) => {
+  await ctx.conversation.enter("evening");
+});
+
 bot.command("myprojects", async (ctx) => {
   const user = await prisma.user.findUnique({ 
     where: { telegramId: ctx.from?.id },
@@ -177,15 +181,25 @@ bot.hears("📋 Мои задачи", myTasksHandler);
 bot.command("mytasks", myTasksHandler);
 
 bot.callbackQuery("start_morning", async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел:", e); }
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.deleteMessage().catch(() => {});
-  await ctx.conversation.enter("morning");
+  try {
+    await ctx.conversation.enter("morning");
+  } catch (e) {
+    console.error("morning conversation failed:", e);
+    await ctx.reply("Что-то пошло не так, попробуй ещё раз или напиши /menu").catch(() => {});
+  }
 });
 
 bot.callbackQuery("start_evening", async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел:", e); }
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.deleteMessage().catch(() => {});
-  await ctx.conversation.enter("evening");
+  try {
+    await ctx.conversation.enter("evening");
+  } catch (e) {
+    console.error("evening conversation failed:", e);
+    await ctx.reply("Что-то пошло не так, попробуй ещё раз или напиши /menu").catch(() => {});
+  }
 });
 
 bot.callbackQuery(/^ans_custom_(.+)$/, async (ctx) => {
@@ -287,6 +301,7 @@ bot.on("message:text", async (ctx) => {
     { reply_markup: getMainMenuKeyboard(user?.isAdmin ?? false) }
   );
 });
+
 
 bot.start({
   onStart: () => {
