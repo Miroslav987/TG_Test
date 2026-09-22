@@ -13,7 +13,7 @@ import { eveningConversation } from "./conversations/evening";
 import { morningConversation } from "./conversations/morning";
 import { prisma, sendTelegramMessage } from "@standup/shared";
 
-export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; [key: string]: any } }; 
+export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
 
 bot.use(session({ initial: () => ({}) }));
@@ -124,16 +124,24 @@ bot.command("mytasks", myTasksHandler);
 
 bot.callbackQuery("start_morning", async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел:", e); }
+  await ctx.deleteMessage().catch(() => {}); // Удаляем приглашение сразу
   await ctx.conversation.enter("morning");
 });
 
 bot.callbackQuery("start_evening", async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел:", e); }
+  await ctx.deleteMessage().catch(() => {}); // Удаляем приглашение сразу
   await ctx.conversation.enter("evening");
 });
 
 bot.callbackQuery(/^ans_custom_(.+)$/, async (ctx) => {
   ctx.session.customQuestionId = ctx.match[1];
+  
+  // СОХРАНЯЕМ ID СООБЩЕНИЯ С ВОПРОСОМ
+  if (ctx.callbackQuery.message?.message_id) {
+    ctx.session.promptMessageId = ctx.callbackQuery.message.message_id;
+  }
+  
   try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел:", e); }
   await ctx.conversation.enter("customQuestion");
 });

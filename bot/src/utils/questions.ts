@@ -9,7 +9,8 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
     const msg = await ctx.reply(q.text, { reply_markup: kb });
     const resp = await conversation.waitForCallbackQuery(["yes", "no"]);
     
-    await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msg.message_id, { reply_markup: new InlineKeyboard() });
+    // УДАЛЯЕМ СООБЩЕНИЕ ПОСЛЕ ОТВЕТА
+    await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
     try { await resp.answerCallbackQuery(); } catch (e) {}
     return resp.match === "yes" ? "Да" : "Нет";
   } 
@@ -19,7 +20,8 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
     const msg = await ctx.reply(q.text, { reply_markup: kb });
     const resp = await conversation.waitForCallbackQuery(/sel_\d+/);
     
-    await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msg.message_id, { reply_markup: new InlineKeyboard() });
+    // УДАЛЯЕМ СООБЩЕНИЕ ПОСЛЕ ОТВЕТА
+    await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
     
     const idx = parseInt(resp.callbackQuery.data.replace("sel_", ""));
     try { await resp.answerCallbackQuery(); } catch (e) {}
@@ -47,7 +49,8 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
       const data = resp.callbackQuery.data;
       
       if (data === "submit_multi") {
-        await ctx.api.editMessageReplyMarkup(ctx.chat!.id, msgId, { reply_markup: new InlineKeyboard() });
+        // УДАЛЯЕМ СООБЩЕНИЕ ПОСЛЕ НАЖАТИЯ "ГОТОВО"
+        await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
         try { await resp.answerCallbackQuery(); } catch (e) {}
         break;
       } else {
@@ -70,7 +73,6 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
     await ctx.reply(q.text);
     const resp = await conversation.waitFor("message:text");
     
-    // ПРОВЕРКА НА ТРИГГЕРЫ МЕНЮ ВНУТРИ ХЕЛПЕРА
     if (resp.message?.text && MENU_TRIGGERS.includes(resp.message.text)) {
       await ctx.reply("Отменил текущее действие. Нажми на кнопку ещё раз, чтобы начать заново 👆");
       return "_CANCEL_";
