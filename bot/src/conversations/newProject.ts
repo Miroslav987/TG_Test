@@ -6,14 +6,12 @@ export async function newProjectConversation(conversation: Conversation<MyContex
   const user = await conversation.external(() => 
     prisma.user.findUnique({ where: { telegramId: ctx.from?.id } })
   );
-  
   if (!user) return;
 
   await ctx.reply("Как назвать проект?");
   
   const nameCtx = await conversation.waitFor("message:text");
 
-  // ПРОВЕРКА НА ТРИГГЕРЫ МЕНЮ
   if (nameCtx.message?.text && MENU_TRIGGERS.includes(nameCtx.message.text)) {
     await ctx.reply("Отменил текущее действие. Нажми на кнопку ещё раз, чтобы начать заново 👆");
     return;
@@ -25,11 +23,16 @@ export async function newProjectConversation(conversation: Conversation<MyContex
     return;
   }
 
-  await conversation.external(() => 
+  const project = await conversation.external(() => 
     prisma.project.create({
       data: { name, tasksRequired: true, users: { connect: { id: user.id } } }
     })
   );
 
-  await ctx.reply(`✅ Проект «${name}» создан, ты в нём участник.`);
+  // ДОБАВЛЕНО: Инлайн-кнопка для быстрого удаления
+  await ctx.reply(`✅ Проект «${name}» создан, ты в нём участник.`, {
+    reply_markup: {
+      inline_keyboard: [[{ text: "🗑 Удалить проект", callback_data: `del_project_${project.id}` }]]
+    }
+  });
 }

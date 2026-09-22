@@ -47,6 +47,7 @@ model Project {
   name          String
   isActive      Boolean  @default(true)
   tasksRequired Boolean  @default(true)
+  createdAt      DateTime  @default(now())
   users         User[]
   tasks         Task[]
   reports       Report[] // <-- НОВАЯ СВЯЗЬ
