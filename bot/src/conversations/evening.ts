@@ -2,10 +2,10 @@ import { Conversation } from "@grammyjs/conversations";
 import { InlineKeyboard } from "grammy";
 import { MyContext, prisma } from "../index";
 import { askQuestionHelper } from "../utils/questions";
-import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { subDays } from "date-fns";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz"; 
 
 export async function eveningConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
-  // ДОБАВЛЕНО: include: { roles: true }
   const user = await conversation.external(() => 
     prisma.user.findUnique({ where: { telegramId: ctx.from?.id }, include: { roles: true } })
   );
@@ -15,9 +15,12 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
     prisma.checkIn.create({ data: { userId: user.id, type: "EVENING" } })
   );
 
-  // 1. Апдейт статусов открытых тасок юзера
+  // ДОБАВЛЕНО: include: { project: true }
   const openTasks = await conversation.external(() => 
-    prisma.task.findMany({ where: { assigneeId: user.id, status: { not: "DONE" } } })
+    prisma.task.findMany({ 
+      where: { assigneeId: user.id, status: { not: "DONE" } },
+      include: { project: true }
+    })
   );
 
   if (openTasks.length > 0) {
@@ -29,11 +32,13 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
         .text("🔄 В процессе", "IN_PROGRESS").row()
         .text("⛔ Блокер", "BLOCKED");
 
-      await ctx.reply(`Задача: ${task.title}\nКакой статус?`, { reply_markup: kb });
+      // ДОБАВЛЕНО: Защита имени проекта
+      const projName = task.project?.name ?? "Без проекта";
+      await ctx.reply(`Задача: [${projName}] ${task.title}\nКакой статус?`, { reply_markup: kb });
       
       const statusCtx = await conversation.waitForCallbackQuery(["DONE", "IN_PROGRESS", "BLOCKED"]);
-      const newStatus = statusCtx.match as "DONE" | "IN_PROGRESS" | "BLOCKED";
-      await statusCtx.answerCallbackQuery();
+      const newStatus = statusCtx.callbackQuery.data as "DONE" | "IN_PROGRESS" | "BLOCKED";
+      try { await statusCtx.answerCallbackQuery(); } catch (e) {}
 
       await conversation.external(() => 
         prisma.task.update({ where: { id: task.id }, data: { status: newStatus } })

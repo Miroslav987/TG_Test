@@ -151,8 +151,9 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
   const safeTasks = user.tasks.map(t => ({
     title: t.title,
     status: t.status,
-    project: t.project?.name || "Без проекта"
+    project: t.project?.name ?? "Без проекта"
   }));
+
 
   const safeCheckIns = checkIns.map(c => ({
     date: c.createdAt.toISOString().split('T')[0],
