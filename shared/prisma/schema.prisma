@@ -109,6 +109,7 @@ model Question {
   checkInTime CheckInTime? // <-- Добавьте '?'
   isRequired  Boolean      @default(true)
   includeInReport Boolean      @default(true)
+  remindUntilAnswered Boolean      @default(false)
 
   targetRoleId String?
   targetRole   Role?   @relation("RoleQuestions", fields: [targetRoleId], references: [id])
@@ -133,6 +134,7 @@ model QuestionDelivery {
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now())
+  lastReminderAt DateTime?
 
   @@index([questionId, userId])
 }

@@ -48,14 +48,22 @@ export default function QuestionItem({ q, roles, users, }: any) {
       </div>
       
       <div className="flex justify-start items-center gap-4 text-xs mt-2 border-t pt-3">
-        {/* НОВАЯ ССЫЛКА НА ИСТОРИЮ */}
         <Link href={`/questions/${q.id}`} className="text-purple-600 hover:underline font-medium">
           📊 История ответов
         </Link>
         <span className="text-gray-300">|</span>
-        <button onClick={() => setIsEditing(true)} className="text-blue-600 hover:underline">
-          ✏️ Изменить
-        </button>
+        
+        {/* ЛОГИКА СКРЫТИЯ КНОПКИ РЕДАКТИРОВАНИЯ */}
+        {(q.scheduleType === "EXACT_TIME" && q.deliveries?.length > 0) ? (
+          <span className="text-gray-500 italic">
+            ✅ Отправлен {new Date(q.deliveries[0].createdAt).toLocaleString("ru-RU", { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+          </span>
+        ) : (
+          <button onClick={() => setIsEditing(true)} className="text-blue-600 hover:underline">
+            ✏️ Изменить
+          </button>
+        )}
+        
         <form action={deleteQuestion} onSubmit={(e) => !confirm(`Удалить вопрос "${q.text}"?`) && e.preventDefault()}>
           <input type="hidden" name="id" value={q.id} />
           <button type="submit" className="text-red-600 hover:underline">🗑 Удалить</button>

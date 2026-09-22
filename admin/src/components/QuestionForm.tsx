@@ -138,13 +138,19 @@ export default function QuestionForm({ roles, users, question, onCancel }: { rol
         )}
       </div>
 
-      <div className="mb-6 flex gap-6 items-center border-t pt-4">
-        <label className="flex items-center text-sm text-gray-700 cursor-pointer">
+      <div className="mb-6 flex flex-col gap-3 border-t pt-4">
+        <label className="flex items-center text-sm text-gray-700 cursor-pointer w-fit">
           <input type="checkbox" name="isRequired" defaultChecked={question ? question.isRequired : true} className="mr-2 h-4 w-4 text-blue-600" />
           Обязательный вопрос
         </label>
         
-        <label className="flex items-center text-sm font-medium text-purple-700 cursor-pointer">
+        {/* НОВАЯ ГАЛОЧКА */}
+        <label className="flex items-center text-sm text-gray-700 cursor-pointer w-fit">
+          <input type="checkbox" name="remindUntilAnswered" defaultChecked={question ? question.remindUntilAnswered : false} className="mr-2 h-4 w-4 text-blue-600" />
+          🔔 Напоминать каждые 3 часа, пока не ответит
+        </label>
+        
+        <label className="flex items-center text-sm font-medium text-purple-700 cursor-pointer w-fit">
           <input type="checkbox" name="includeInReport" defaultChecked={question ? question.includeInReport : true} className="mr-2 h-4 w-4 text-purple-600" />
           📊 Добавлять ответы в сводные отчёты ИИ
         </label>
