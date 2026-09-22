@@ -98,7 +98,11 @@ export async function generateProjectReport(projectId: string) {
 
   try {
     const result = await model.generateContent(prompt);
-    return result.response.text();
+    const aiText = result.response.text();
+    
+    // ДОБАВЛЕНО: Детерминированная вставка стрика перед ответом ИИ
+    return `🔥 Текущая серия без пропусков: ${user.streakCount} дней\n\n${aiText}`;   
+
   } catch (error) {
     return "Не удалось сгенерировать отчет из-за ошибки сервиса AI.";
   }

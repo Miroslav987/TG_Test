@@ -20,6 +20,8 @@ model User {
   isActive     Boolean  @default(true)
   isAdmin      Boolean  @default(false)
   passwordHash String?
+  pausedUntil         DateTime?
+  streakCount         Int       @default(0)
 
   // Tracking
   lastMorningCheck    DateTime?

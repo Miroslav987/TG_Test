@@ -12,6 +12,7 @@ import { customQuestionConversation } from "./conversations/customQuestion";
 import { eveningConversation } from "./conversations/evening";
 import { morningConversation } from "./conversations/morning";
 import { prisma, sendTelegramMessage } from "@standup/shared";
+import { pauseConversation } from "./conversations/pause";
 
 export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
@@ -26,10 +27,11 @@ bot.use(createConversation(customQuestionConversation, "customQuestion"));
 
 bot.use(createConversation(morningConversation, "morning")); // <--- Регистрация
 bot.use(createConversation(eveningConversation, "evening"));
+bot.use(createConversation(pauseConversation, "pause")); 
 
 export const MENU_TRIGGERS = [
   "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", 
-  "/newtask", "/newproject", "/mytasks", "/start", "/menu"
+  "/newtask", "/newproject", "/mytasks", "/start", "/menu", "/pause", "/unpause"
 ];
 
 export const mainMenuKeyboard = new Keyboard()
@@ -62,6 +64,17 @@ bot.command("start", async (ctx) => {
   await ctx.reply(`Отлично, ${user.name}! Твой Telegram привязан. Я буду писать тебе по расписанию.`, {
     reply_markup: mainMenuKeyboard
   });
+});
+
+// === НОВЫЕ КОМАНДЫ ПАУЗЫ ===
+bot.command("pause", async (ctx) => ctx.conversation.enter("pause"));
+
+bot.command("unpause", async (ctx) => {
+  await prisma.user.update({ 
+    where: { telegramId: ctx.from!.id }, 
+    data: { pausedUntil: null } 
+  });
+  await ctx.reply("✅ Пауза снята, снова на связи.");
 });
 
 bot.command("menu", async (ctx) => {

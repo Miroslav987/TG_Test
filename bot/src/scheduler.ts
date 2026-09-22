@@ -11,6 +11,8 @@ function timeToMinutes(timeStr: string) {
 export function startScheduler(bot: Bot<MyContext>) {
   console.log("⏱ Тикер-планировщик запущен...");
 
+  
+
   setInterval(async () => {
     try {
       const users = await prisma.user.findMany({ 
@@ -27,6 +29,8 @@ export function startScheduler(bot: Bot<MyContext>) {
         const currentDay = parseInt(formatInTimeZone(now, user.timezone, 'i')); 
         const currentTimeStr = formatInTimeZone(now, user.timezone, 'HH:mm');
         const todayStart = startOfDay(now);
+
+        if (user.pausedUntil && user.pausedUntil > now) continue;
 
         // ==========================================
         // 1. СТАНДАРТНЫЕ УТРЕННИЕ И ВЕЧЕРНИЕ ЧЕК-ИНЫ

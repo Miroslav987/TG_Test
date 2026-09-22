@@ -2,6 +2,7 @@ import { Conversation } from "@grammyjs/conversations";
 import { InlineKeyboard } from "grammy";
 import { MyContext, prisma } from "../index";
 import { askQuestionHelper } from "../utils/questions";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 
 export async function eveningConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
   // ДОБАВЛЕНО: include: { roles: true }
@@ -78,4 +79,60 @@ for (const q of questions) {
   );
 
   await ctx.reply("✨ Итоги дня записаны. Отдыхай!");
+
+    // === НОВОЕ: ПОДСЧЕТ СЕРИИ БЕЗ ПРОПУСКОВ ===
+  const now = new Date();
+  const todayStr = formatInTimeZone(now, user.timezone, "yyyy-MM-dd");
+  const startOfToday = fromZonedTime(`${todayStr} 00:00:00`, user.timezone);
+
+  // Считаем серию только при первом вечернем чек-ине за сегодня (если заполнил 2 раза, считаем только первый)
+  const todayEveningCount = await conversation.external(() => 
+    prisma.checkIn.count({
+      where: { userId: user.id, type: "EVENING", createdAt: { gte: startOfToday } }
+    })
+  );
+
+  if (todayEveningCount === 1) {
+    let prevDate = now;
+    let prevDayFound = false;
+
+    // Ищем предыдущий рабочий день (максимум на 14 дней назад, защита от бесконечного цикла)
+    for (let i = 1; i <= 14; i++) {
+      prevDate = subDays(now, i);
+      const day = parseInt(formatInTimeZone(prevDate, user.timezone, 'i'));
+      if (user.workDays.includes(day)) {
+        prevDayFound = true;
+        break;
+      }
+    }
+
+    if (prevDayFound) {
+      const prevDateString = formatInTimeZone(prevDate, user.timezone, "yyyy-MM-dd");
+      const startOfPrev = fromZonedTime(`${prevDateString} 00:00:00`, user.timezone);
+      const endOfPrev = fromZonedTime(`${prevDateString} 23:59:59`, user.timezone);
+
+      // Проверяем, был ли вечерний чекин в предыдущий рабочий день
+      const hasPrevCheckIn = await conversation.external(() => 
+        prisma.checkIn.findFirst({
+          where: { userId: user.id, type: "EVENING", createdAt: { gte: startOfPrev, lte: endOfPrev } }
+        })
+      );
+
+      const newStreak = hasPrevCheckIn ? user.streakCount + 1 : 1;
+      await conversation.external(() => 
+        prisma.user.update({ where: { id: user.id }, data: { streakCount: newStreak } })
+      );
+
+      if (newStreak >= 2) {
+        await ctx.reply(`🔥 ${newStreak} дней подряд без пропусков!`);
+      }
+    } else {
+      // Если предыдущих рабочих дней не найдено (например, график только 1 день в неделю или только устроился)
+      await conversation.external(() => 
+        prisma.user.update({ where: { id: user.id }, data: { streakCount: 1 } })
+      );
+    }
+  }
+
 }
+
