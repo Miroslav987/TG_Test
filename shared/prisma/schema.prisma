@@ -7,6 +7,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AbsenceType {
+  FULL_DAY
+  RANGE
+  PARTIAL_HOURS
+}
+
+model Absence {
+  id         String      @id @default(uuid())
+  userId     String
+  user       User        @relation(fields: [userId], references: [id])
+  type       AbsenceType
+  startDate  DateTime
+  endDate    DateTime
+  startTime  String?
+  endTime    String?
+  reason     String?
+  createdAt  DateTime    @default(now())
+}
+
 model User {
   id           String   @id @default(uuid())
   telegramId   BigInt?  @unique
@@ -35,6 +54,7 @@ model User {
   reports          Report[]
   QuestionDelivery QuestionDelivery[]
   answers          Answer[]           // <-- ДОБАВЛЕНО ЭТО ПОЛЕ
+  absences            Absence[]
 }
 
 model Role {

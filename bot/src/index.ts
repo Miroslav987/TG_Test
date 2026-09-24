@@ -15,6 +15,7 @@ import { viewReportsConversation } from "./conversations/viewReports"; // <-- Д
 import { eveningConversation } from "./conversations/evening"; // <-- ДОБАВЛЕНО
 import { morningConversation } from "./conversations/morning"; // <-- ДОБАВЛЕНО
 import { prisma, sendTelegramMessage } from "@standup/shared";
+import { absenceConversation } from "./conversations/absence";
 
 export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
@@ -29,6 +30,7 @@ bot.use(createConversation(customQuestionConversation, "customQuestion"));
 bot.use(createConversation(pauseConversation, "pause"));
 bot.use(createConversation(newQuestionConversation, "newQuestion"));
 bot.use(createConversation(viewReportsConversation, "viewReports")); // <-- ДОБАВЛЕНО
+bot.use(createConversation(absenceConversation, "absence"));
 
 bot.use(createConversation(morningConversation, "morning"));
 bot.use(createConversation(eveningConversation, "evening"));
@@ -36,10 +38,9 @@ bot.use(createConversation(eveningConversation, "evening"));
 // ОБНОВЛЁННЫЕ ТРИГГЕРЫ МЕНЮ (Добавлены Отчёты)
 export const MENU_TRIGGERS = [
   "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", "🆕 Новый вопрос", "📊 Отчёты",
-  "/newtask", "/newproject", "/mytasks", "/myprojects", "/newquestion", "/reports", "/start", "/menu", "/pause", "/unpause"
+  "/newtask", "/newproject", "/mytasks", "/myprojects", "/newquestion", "/reports", "/start", "/menu", "/pause", "/unpause", "/absence"
 ];
 
-// ОБНОВЛЁННАЯ ФУНКЦИЯ ДИНАМИЧЕСКОГО МЕНЮ
 export function getMainMenuKeyboard(isAdmin: boolean) {
   const kb = new Keyboard()
     .text("➕ Новая задача").text("📂 Новый проект").row()
@@ -47,7 +48,7 @@ export function getMainMenuKeyboard(isAdmin: boolean) {
     .text("❓ Помощь");
   
   if (isAdmin) {
-    kb.row().text("🆕 Новый вопрос").text("📊 Отчёты"); // <-- Отчёты рядом с Новым вопросом
+    kb.row().text("🆕 Новый вопрос").text("📊 Отчёты");
   }
   
   return kb.resized();
@@ -85,11 +86,13 @@ bot.command("menu", async (ctx) => {
 bot.hears("❓ Помощь", async (ctx) => {
   const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
   
+  // ДОБАВЛЕНО /absence в текст помощи
   let helpText = "🤖 *Что я умею:*\n\n" +
     "➕ *Новая задача* — быстро добавить таск в проект\n" +
     "📂 *Новый проект* — создать проект и стать его участником\n" +
     "📋 *Мои задачи* — посмотреть открытые таски и изменить их статусы\n" +
-    "📁 */myprojects* — список твоих проектов\n\n" +
+    "📁 */myprojects* — список твоих проектов\n" +
+    "🏖 */absence* — сообщить об отсутствии (выходной, отпуск, отойти по делам)\n\n" +
     "А ещё я буду присылать опросы по расписанию, чтобы собирать отчёты для команды!";
     
   if (user?.isAdmin) {
@@ -98,6 +101,9 @@ bot.hears("❓ Помощь", async (ctx) => {
 
   await ctx.reply(helpText, { parse_mode: "Markdown", reply_markup: getMainMenuKeyboard(user?.isAdmin ?? false) });
 });
+
+// ДОБАВЛЕН ОБРАБОТЧИК /absence
+bot.command("absence", async (ctx) => ctx.conversation.enter("absence"));
 
 bot.hears("➕ Новая задача", async (ctx) => ctx.conversation.enter("newTask"));
 bot.command("newtask", async (ctx) => ctx.conversation.enter("newTask"));
@@ -108,7 +114,6 @@ bot.command("newproject", async (ctx) => ctx.conversation.enter("newProject"));
 bot.hears("🆕 Новый вопрос", async (ctx) => ctx.conversation.enter("newQuestion"));
 bot.command("newquestion", async (ctx) => ctx.conversation.enter("newQuestion"));
 
-// ДОБАВЛЕНЫ ОБРАБОТЧИКИ ОТЧЁТОВ
 bot.hears("📊 Отчёты", async (ctx) => ctx.conversation.enter("viewReports"));
 bot.command("reports", async (ctx) => ctx.conversation.enter("viewReports"));
 
@@ -137,6 +142,7 @@ bot.command("myprojects", async (ctx) => {
   const lines = user.projects.map(p => `📂 *${p.name}* — ${p._count.tasks} открытых задач`);
   await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
 });
+
 
 const myTasksHandler = async (ctx: MyContext) => {
   const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
