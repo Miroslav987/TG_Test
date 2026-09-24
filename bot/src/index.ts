@@ -10,10 +10,11 @@ import { newProjectConversation } from "./conversations/newProject";
 import { editTaskConversation } from "./conversations/editTask";
 import { customQuestionConversation } from "./conversations/customQuestion";
 import { pauseConversation } from "./conversations/pause";
-import { prisma, sendTelegramMessage } from "@standup/shared";
 import { newQuestionConversation } from "./conversations/newQuestion";
-import { morningConversation } from "./conversations/morning";
-import { eveningConversation } from "./conversations/evening";
+import { viewReportsConversation } from "./conversations/viewReports"; // <-- ДОБАВЛЕНО
+import { eveningConversation } from "./conversations/evening"; // <-- ДОБАВЛЕНО
+import { morningConversation } from "./conversations/morning"; // <-- ДОБАВЛЕНО
+import { prisma, sendTelegramMessage } from "@standup/shared";
 
 export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
@@ -26,17 +27,19 @@ bot.use(createConversation(newProjectConversation, "newProject"));
 bot.use(createConversation(editTaskConversation, "editTask"));
 bot.use(createConversation(customQuestionConversation, "customQuestion"));
 bot.use(createConversation(pauseConversation, "pause"));
-bot.use(createConversation(newQuestionConversation, "newQuestion")); // <-- ДОБАВЛЕНО
+bot.use(createConversation(newQuestionConversation, "newQuestion"));
+bot.use(createConversation(viewReportsConversation, "viewReports")); // <-- ДОБАВЛЕНО
 
 bot.use(createConversation(morningConversation, "morning"));
 bot.use(createConversation(eveningConversation, "evening"));
-// ОБНОВЛЁННЫЕ ТРИГГЕРЫ МЕНЮ
+
+// ОБНОВЛЁННЫЕ ТРИГГЕРЫ МЕНЮ (Добавлены Отчёты)
 export const MENU_TRIGGERS = [
-  "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", "🆕 Новый вопрос",
-  "/newtask", "/newproject", "/mytasks", "/myprojects", "/newquestion", "/start", "/menu", "/pause", "/unpause"
+  "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", "🆕 Новый вопрос", "📊 Отчёты",
+  "/newtask", "/newproject", "/mytasks", "/myprojects", "/newquestion", "/reports", "/start", "/menu", "/pause", "/unpause"
 ];
 
-// === ФУНКЦИЯ ДИНАМИЧЕСКОГО МЕНЮ ===
+// ОБНОВЛЁННАЯ ФУНКЦИЯ ДИНАМИЧЕСКОГО МЕНЮ
 export function getMainMenuKeyboard(isAdmin: boolean) {
   const kb = new Keyboard()
     .text("➕ Новая задача").text("📂 Новый проект").row()
@@ -44,7 +47,7 @@ export function getMainMenuKeyboard(isAdmin: boolean) {
     .text("❓ Помощь");
   
   if (isAdmin) {
-    kb.row().text("🆕 Новый вопрос");
+    kb.row().text("🆕 Новый вопрос").text("📊 Отчёты"); // <-- Отчёты рядом с Новым вопросом
   }
   
   return kb.resized();
@@ -90,7 +93,7 @@ bot.hears("❓ Помощь", async (ctx) => {
     "А ещё я буду присылать опросы по расписанию, чтобы собирать отчёты для команды!";
     
   if (user?.isAdmin) {
-    helpText += "\n\n👑 *Админу:*\n🆕 *Новый вопрос* — создать опрос прямо отсюда.";
+    helpText += "\n\n👑 *Админу:*\n🆕 *Новый вопрос* — создать опрос прямо отсюда\n📊 *Отчёты* — сгенерировать отчёт по сотруднику.";
   }
 
   await ctx.reply(helpText, { parse_mode: "Markdown", reply_markup: getMainMenuKeyboard(user?.isAdmin ?? false) });
@@ -102,18 +105,17 @@ bot.command("newtask", async (ctx) => ctx.conversation.enter("newTask"));
 bot.hears("📂 Новый проект", async (ctx) => ctx.conversation.enter("newProject"));
 bot.command("newproject", async (ctx) => ctx.conversation.enter("newProject"));
 
-// ДОБАВЛЕНЫ ОБРАБОТЧИКИ НОВОГО ВОПРОСА
 bot.hears("🆕 Новый вопрос", async (ctx) => ctx.conversation.enter("newQuestion"));
 bot.command("newquestion", async (ctx) => ctx.conversation.enter("newQuestion"));
+
+// ДОБАВЛЕНЫ ОБРАБОТЧИКИ ОТЧЁТОВ
+bot.hears("📊 Отчёты", async (ctx) => ctx.conversation.enter("viewReports"));
+bot.command("reports", async (ctx) => ctx.conversation.enter("viewReports"));
 
 bot.command("pause", async (ctx) => ctx.conversation.enter("pause"));
 bot.command("unpause", async (ctx) => {
   const user = await prisma.user.update({ where: { telegramId: ctx.from!.id }, data: { pausedUntil: null } });
   await ctx.reply("✅ Пауза снята, снова на связи.", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
-});
-
-bot.command("testevening", async (ctx) => {
-  await ctx.conversation.enter("evening");
 });
 
 bot.command("myprojects", async (ctx) => {
@@ -181,25 +183,15 @@ bot.hears("📋 Мои задачи", myTasksHandler);
 bot.command("mytasks", myTasksHandler);
 
 bot.callbackQuery("start_morning", async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел:", e); }
   await ctx.deleteMessage().catch(() => {});
-  try {
-    await ctx.conversation.enter("morning");
-  } catch (e) {
-    console.error("morning conversation failed:", e);
-    await ctx.reply("Что-то пошло не так, попробуй ещё раз или напиши /menu").catch(() => {});
-  }
+  await ctx.conversation.enter("morning");
 });
 
 bot.callbackQuery("start_evening", async (ctx) => {
-  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  try { await ctx.answerCallbackQuery(); } catch (e) { console.log("Callback устарел:", e); }
   await ctx.deleteMessage().catch(() => {});
-  try {
-    await ctx.conversation.enter("evening");
-  } catch (e) {
-    console.error("evening conversation failed:", e);
-    await ctx.reply("Что-то пошло не так, попробуй ещё раз или напиши /menu").catch(() => {});
-  }
+  await ctx.conversation.enter("evening");
 });
 
 bot.callbackQuery(/^ans_custom_(.+)$/, async (ctx) => {
@@ -301,7 +293,6 @@ bot.on("message:text", async (ctx) => {
     { reply_markup: getMainMenuKeyboard(user?.isAdmin ?? false) }
   );
 });
-
 
 bot.start({
   onStart: () => {
