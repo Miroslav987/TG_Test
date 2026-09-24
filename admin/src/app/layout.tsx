@@ -22,7 +22,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {sessionCookie && (
           <header className="bg-white shadow-sm mb-8 border-b">
             <div className="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center text-sm font-medium text-gray-600">
-              <div>3.0m</div>
+              <div>3.0lp</div>
               <div className="flex gap-6">
                 <Link href="/" className="hover:text-blue-600">Сотрудники</Link>
                 <Link href="/roles" className="hover:text-blue-600">Роли</Link>
