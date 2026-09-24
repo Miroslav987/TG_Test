@@ -54,6 +54,7 @@ export function getMainMenuKeyboard(isAdmin: boolean) {
   
   if (isAdmin) {
     kb.row().text("🆕 Новый вопрос").text("📊 Отчёты");
+    kb.row().text("📤 Назначить задачу"); // <-- ДОБАВЛЕНО
   }
   
   return kb.resized();
@@ -106,6 +107,10 @@ bot.hears("❓ Помощь", async (ctx) => {
 
   await ctx.reply(helpText, { parse_mode: "Markdown", reply_markup: getMainMenuKeyboard(user?.isAdmin ?? false) });
 });
+
+bot.hears("📤 Назначить задачу", async (ctx) => ctx.conversation.enter("assignTask"));
+bot.command("assign", async (ctx) => ctx.conversation.enter("assignTask"));
+
 
 // ДОБАВЛЕН ОБРАБОТЧИК /absence
 bot.command("absence", async (ctx) => ctx.conversation.enter("absence"));
@@ -195,7 +200,14 @@ const myTasksHandler = async (ctx: MyContext) => {
   if (!user) return;
 
   const tasks = await prisma.task.findMany({
-    where: { assigneeId: user.id, status: { not: "DONE" } },
+    where: { 
+      status: { not: "DONE" },
+      // ИЗМЕНЕНО: берём задачи, где юзер исполнитель, ИЛИ (исполнителя нет, но юзер — создатель)
+      OR: [
+        { assigneeId: user.id },
+        { assigneeId: null, createdById: user.id }
+      ]
+    },
     include: { project: true },
   });
 
