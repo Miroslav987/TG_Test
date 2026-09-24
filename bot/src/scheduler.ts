@@ -27,8 +27,51 @@ export function startScheduler(bot: Bot<MyContext>) {
         const currentDay = parseInt(formatInTimeZone(now, user.timezone, 'i')); 
         const currentTimeStr = formatInTimeZone(now, user.timezone, 'HH:mm');
         const todayStart = startOfDay(now);
+        const todayStr = formatInTimeZone(now, user.timezone, 'yyyy-MM-dd');
 
+          // ==========================================
+        // 0. АКТУАЛИЗАЦИЯ ОТСУТСТВИЙ
+        // ==========================================
+        const activeAbsences = await prisma.absence.findMany({
+          where: {
+            userId: user.id,
+            status: "ACTIVE",
+            type: { in: ["FULL_DAY", "RANGE"] }
+          }
+        });
+
+        for (const abs of activeAbsences) {
+          const startStr = formatInTimeZone(abs.startDate, user.timezone, 'yyyy-MM-dd');
+          const endStr = formatInTimeZone(abs.endDate, user.timezone, 'yyyy-MM-dd');
+
+          // Если сегодня попадает в диапазон отсутствия
+          if (todayStr >= startStr && todayStr <= endStr) {
+            const lastReconfStr = abs.lastReconfirmedAt ? formatInTimeZone(abs.lastReconfirmedAt, user.timezone, 'yyyy-MM-dd') : null;
+
+            // Если сегодня еще не подтверждали
+            if (lastReconfStr !== todayStr) {
+              // Сразу обновляем дату, чтобы тикер не спамил каждую минуту
+              await prisma.absence.update({ where: { id: abs.id }, data: { lastReconfirmedAt: now } });
+              
+              const dateText = startStr === endStr ? startStr : `${startStr} – ${endStr}`;
+              const kb = new InlineKeyboard()
+                .text("✅ Да, актуально", `absence_yes_${abs.id}`).row()
+                .text("❌ Уже не актуально", `absence_no_${abs.id}`);
+
+              await bot.api.sendMessage(
+                Number(user.telegramId), 
+                `Ты указывал(а), что не будешь работать ${dateText} — это всё ещё актуально?`, 
+                { reply_markup: kb }
+              );
+            }
+          }
+        }
+
+        // ==========================================
+        // ПРОПУСКАЕМ ОСТАЛЬНОЕ, ЕСЛИ ПОЛЬЗОВАТЕЛЬ НА ПАУЗЕ
+        // ==========================================
         if (user.pausedUntil && user.pausedUntil > now) continue;
+
 
         if (user.workDays.includes(currentDay)) {
           

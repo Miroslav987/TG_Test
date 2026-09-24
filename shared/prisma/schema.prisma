@@ -24,6 +24,7 @@ model Absence {
   endTime    String?
   reason     String?
   createdAt  DateTime    @default(now())
+  lastReconfirmedAt DateTime?
 }
 
 model User {

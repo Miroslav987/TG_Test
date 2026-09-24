@@ -16,6 +16,7 @@ import { eveningConversation } from "./conversations/evening"; // <-- ДОБАВ
 import { morningConversation } from "./conversations/morning"; // <-- ДОБАВЛЕНО
 import { prisma, sendTelegramMessage } from "@standup/shared";
 import { absenceConversation } from "./conversations/absence";
+import { formatInTimeZone } from "date-fns-tz";
 
 export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
@@ -86,13 +87,13 @@ bot.command("menu", async (ctx) => {
 bot.hears("❓ Помощь", async (ctx) => {
   const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
   
-  // ДОБАВЛЕНО /absence в текст помощи
   let helpText = "🤖 *Что я умею:*\n\n" +
     "➕ *Новая задача* — быстро добавить таск в проект\n" +
     "📂 *Новый проект* — создать проект и стать его участником\n" +
     "📋 *Мои задачи* — посмотреть открытые таски и изменить их статусы\n" +
     "📁 */myprojects* — список твоих проектов\n" +
-    "🏖 */absence* — сообщить об отсутствии (выходной, отпуск, отойти по делам)\n\n" +
+    "🏖 */absence* — сообщить об отсутствии (выходной, отпуск, отойти по делам)\n" +
+    "❌ */myabsences* — посмотреть и отменить свои активные отсутствия\n\n" +
     "А ещё я буду присылать опросы по расписанию, чтобы собирать отчёты для команды!";
     
   if (user?.isAdmin) {
@@ -104,6 +105,47 @@ bot.hears("❓ Помощь", async (ctx) => {
 
 // ДОБАВЛЕН ОБРАБОТЧИК /absence
 bot.command("absence", async (ctx) => ctx.conversation.enter("absence"));
+
+// === НОВАЯ КОМАНДА: МОИ ОТСУТСТВИЯ ===
+bot.command("myabsences", async (ctx) => {
+  const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
+  if (!user) return;
+
+  const absences = await prisma.absence.findMany({
+    where: { userId: user.id, status: "ACTIVE" },
+    orderBy: { startDate: 'asc' }
+  });
+
+  const now = new Date();
+  const todayStr = formatInTimeZone(now, user.timezone, 'yyyy-MM-dd');
+  
+  // Оставляем только те, которые еще не завершились
+  const validAbsences = absences.filter(abs => {
+    const endStr = formatInTimeZone(abs.endDate, user.timezone, 'yyyy-MM-dd');
+    return endStr >= todayStr;
+  });
+
+  if (validAbsences.length === 0) {
+    return ctx.reply("Активных отсутствий нет.");
+  }
+
+  await ctx.reply(" Твои активные отсутствия:");
+  
+  for (const abs of validAbsences) {
+    const sDate = formatInTimeZone(abs.startDate, user.timezone, 'dd.MM.yyyy');
+    const eDate = formatInTimeZone(abs.endDate, user.timezone, 'dd.MM.yyyy');
+    
+    let text = "";
+    if (abs.type === "FULL_DAY") text = `На весь день ${sDate}`;
+    else if (abs.type === "RANGE") text = `С ${sDate} по ${eDate}`;
+    else text = `${sDate} с ${abs.startTime} до ${abs.endTime}`;
+
+    if (abs.reason) text += `\nПричина: ${abs.reason}`;
+
+    const kb = new InlineKeyboard().text("❌ Отменить", `absence_no_${abs.id}`);
+    await ctx.reply(text, { reply_markup: kb });
+  }
+});
 
 bot.hears("➕ Новая задача", async (ctx) => ctx.conversation.enter("newTask"));
 bot.command("newtask", async (ctx) => ctx.conversation.enter("newTask"));
@@ -290,6 +332,60 @@ bot.callbackQuery(/^reqdel_project_(.+)$/, async (ctx) => {
   
   try { await ctx.answerCallbackQuery("Запрос отправлен администратору"); } catch (e) {}
   await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
+});
+
+
+
+// === ФУНКЦИЯ ОТМЕНЫ ОТСУТСТВИЯ ===
+async function cancelAbsence(absenceId: string, ctx: MyContext) {
+  const absence = await prisma.absence.update({ 
+    where: { id: absenceId }, 
+    data: { status: "CANCELLED" }, 
+    include: { user: true } 
+  });
+  
+  const otherActive = await prisma.absence.findFirst({ 
+    where: {
+      userId: absence.userId, 
+      status: "ACTIVE", 
+      id: { not: absence.id },
+      type: { in: ["FULL_DAY", "RANGE"] }
+    }
+  });
+  
+  if (!otherActive) {
+    await prisma.user.update({ 
+      where: { id: absence.userId }, 
+      data: { pausedUntil: null } 
+    });
+  }
+  
+  try { await ctx.answerCallbackQuery("Понял, снова на связи."); } catch(e){}
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+  await ctx.reply("✅ Отменил отсутствие, буду снова писать по расписанию.");
+  
+  const admins = await prisma.user.findMany({ 
+    where: { isAdmin: true, isActive: true, telegramId: { not: null } } 
+  });
+  
+  for (const admin of admins) {
+    await sendTelegramMessage(admin.telegramId!, 
+      `↩️ *${absence.user.name}* отменил(а) ранее заявленное отсутствие — уже на связи.`);
+  }
+}
+
+// === НОВЫЕ ОБРАБОТЧИКИ CALLBACK_QUERY (Подтверждение отсутствия) ===
+bot.callbackQuery(/^absence_yes_(.+)$/, async (ctx) => {
+  await prisma.absence.update({ 
+    where: { id: ctx.match[1] }, 
+    data: { lastReconfirmedAt: new Date() } 
+  });
+  try { await ctx.answerCallbackQuery("Ок, продолжаем!"); } catch(e){}
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+});
+
+bot.callbackQuery(/^absence_no_(.+)$/, async (ctx) => {
+  await cancelAbsence(ctx.match[1], ctx);
 });
 
 bot.on("message:text", async (ctx) => {
