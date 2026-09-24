@@ -42,23 +42,31 @@ export async function createTask(formData: FormData) {
       title,
       projectId,
       assigneeId: assigneeId || null,
+      // В админке createdById оставляем null или можно вытянуть из JWT сессии, но пока не усложняем
       deadline: deadlineStr ? new Date(deadlineStr) : null,
     },
-    include: { project: true, assignee: true } // Сразу подтягиваем связи
+    include: { project: true, assignee: true }
   });
 
-  // Если есть исполнитель с привязанным Telegram — уведомляем его
   if (newTask.assignee?.telegramId) {
-    await sendTelegramMessage(
-      newTask.assignee.telegramId,
-      `📌 Тебе назначена новая задача в проекте «*${newTask.project.name}*»:\n${newTask.title}`,
-      [[{ text: "✅ Принял", callback_data: `ack_task_${newTask.id}` }]]
-    );
+    const deadlineText = newTask.deadline ? new Date(newTask.deadline).toLocaleDateString('ru-RU') : 'не указан';
+    
+    // ИЗМЕНЁН ФОРМАТ СООБЩЕНИЯ
+    const notifyText = `📌 *Вам назначена новая задача*\n${newTask.title}\n\nОт: Администратор (через сайт)\nПроект: ${newTask.project?.name || "Без проекта"}\nСрок: ${deadlineText}`;
+    
+    try {
+      await sendTelegramMessage(
+        newTask.assignee.telegramId,
+        notifyText,
+        [[{ text: "✅ Принял", callback_data: `ack_task_${newTask.id}` }]]
+      );
+    } catch (e) {
+      console.warn("Admin UI: Failed to send task notification", e);
+    }
   }
 
   revalidatePath("/projects");
 }
-
 export async function toggleProjectStatus(formData: FormData) {
   const id = formData.get("projectId") as string;
   const isActive = formData.get("isActive") === "true";

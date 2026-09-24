@@ -94,8 +94,18 @@ export function startScheduler(bot: Bot<MyContext>) {
             // Флаг обновляем сразу, чтобы перезапуск бота не привел к повторной рассылке
             await prisma.user.update({ where: { id: user.id }, data: { lastEveningCheck: now } });
             
-            const completedTasksToday = await prisma.task.count({
-              where: { assigneeId: user.id, status: "DONE", updatedAt: { gte: userStartOfToday } }
+            // const completedTasksToday = await prisma.task.count({
+            //   where: { assigneeId: user.id, status: "DONE", updatedAt: { gte: userStartOfToday } }
+            // });
+                        const completedTasksToday = await prisma.task.count({
+              where: { 
+                status: "DONE", 
+                updatedAt: { gte: userStartOfToday },
+                OR: [
+                  { assigneeId: user.id },
+                  { assigneeId: null, createdById: user.id } // <-- ИЗМЕНЕНО
+                ]
+              }
             });
 
             if (completedTasksToday === 0) {
@@ -123,7 +133,7 @@ export function startScheduler(bot: Bot<MyContext>) {
             }
           }
         }
-        
+
         // ==========================================
         // 2. КАСТОМНЫЕ ВОПРОСЫ (ПЕРВИЧНАЯ ОТПРАВКА)
         // ==========================================

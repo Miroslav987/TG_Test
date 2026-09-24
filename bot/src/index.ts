@@ -17,6 +17,7 @@ import { morningConversation } from "./conversations/morning"; // <-- ДОБАВ
 import { prisma, sendTelegramMessage } from "@standup/shared";
 import { absenceConversation } from "./conversations/absence";
 import { formatInTimeZone } from "date-fns-tz";
+import { assignTaskConversation } from "./conversations/assignTask";
 
 export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
@@ -36,11 +37,14 @@ bot.use(createConversation(absenceConversation, "absence"));
 bot.use(createConversation(morningConversation, "morning"));
 bot.use(createConversation(eveningConversation, "evening"));
 
-// ОБНОВЛЁННЫЕ ТРИГГЕРЫ МЕНЮ (Добавлены Отчёты)
+bot.use(createConversation(assignTaskConversation, "assignTask")); // <-- ДОБАВЛЕНО
+
+// ДОБАВЛЕНО: "📤 Назначить задачу"
 export const MENU_TRIGGERS = [
-  "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", "🆕 Новый вопрос", "📊 Отчёты",
-  "/newtask", "/newproject", "/mytasks", "/myprojects", "/newquestion", "/reports", "/start", "/menu", "/pause", "/unpause", "/absence"
+  "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", "🆕 Новый вопрос", "📊 Отчёты", "📤 Назначить задачу",
+  "/newtask", "/newproject", "/mytasks", "/myprojects", "/newquestion", "/reports", "/assign", "/start", "/menu", "/pause", "/unpause", "/absence", "/myabsences"
 ];
+
 
 export function getMainMenuKeyboard(isAdmin: boolean) {
   const kb = new Keyboard()

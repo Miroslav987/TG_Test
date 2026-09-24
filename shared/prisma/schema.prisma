@@ -55,7 +55,8 @@ model User {
   lastEveningReminder DateTime?
 
   projects         Project[]
-  tasks            Task[]
+  tasks               Task[]    @relation("AssignedTasks")
+  createdTasks        Task[]    @relation("CreatedTasks")
   checkIns         CheckIn[]
   customQuestions  Question[]         @relation("UserCustomQuestions")
   reports          Report[]
@@ -95,11 +96,14 @@ model Task {
   projectId      String?    // <-- ТЕПЕРЬ ОПЦИОНАЛЬНО
   project        Project?   @relation(fields: [projectId], references: [id]) // <-- ТЕПЕРЬ ОПЦИОНАЛЬНО
   assigneeId     String?
-  assignee       User?      @relation(fields: [assigneeId], references: [id])
+  assignee       User?      @relation("AssignedTasks", fields: [assigneeId], references: [id])
   status         TaskStatus @default(TODO)
   deadline       DateTime?
   acknowledgedAt DateTime?
   updatedAt      DateTime   @default(now()) @updatedAt
+  createdById    String?    // <-- НОВОЕ ПОЛЕ
+  creator        User?      @relation("CreatedTasks", fields: [createdById], references: [id]) // <-- НОВОЕ ПОЛЕ
+  @@index([assigneeId]) // <-- НОВЫЙ ИНДЕКС
 }
 
 enum QuestionType {

@@ -15,10 +15,15 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
     prisma.checkIn.create({ data: { userId: user.id, type: "EVENING" } })
   );
 
-  // ДОБАВЛЕНО: include: { project: true }
   const openTasks = await conversation.external(() => 
     prisma.task.findMany({ 
-      where: { assigneeId: user.id, status: { not: "DONE" } },
+      where: { 
+        status: { not: "DONE" },
+        OR: [
+          { assigneeId: user.id },
+          { assigneeId: null, createdById: user.id } // <-- ИЗМЕНЕНО
+        ]
+      },
       include: { project: true }
     })
   );
