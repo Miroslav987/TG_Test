@@ -81,38 +81,38 @@ export function startScheduler(bot: Bot<MyContext>) {
         if (user.workDays.includes(currentDay)) {
           
           // УТРЕННЯЯ РАССЫЛКА (с управляемым флагом)
-          const ENABLE_MORNING = process.env.ENABLE_MORNING_CHECKIN === "true";
+          // const ENABLE_MORNING = process.env.ENABLE_MORNING_CHECKIN === "true";
           
-          if (ENABLE_MORNING && currentTimeStr >= user.workStart && (!user.lastMorningCheck || user.lastMorningCheck < todayStart)) {
-            await prisma.user.update({ where: { id: user.id }, data: { lastMorningCheck: now } });
-            await bot.api.sendMessage(Number(user.telegramId), "🌅 Доброе утро! Время планировать рабочий день.", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
-            await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы начать чек-ин:", { reply_markup: { inline_keyboard: [[{ text: "📝 Начать план", callback_data: "start_morning" }]] } });
-          }
+          // if (ENABLE_MORNING && currentTimeStr >= user.workStart && (!user.lastMorningCheck || user.lastMorningCheck < todayStart)) {
+          //   await prisma.user.update({ where: { id: user.id }, data: { lastMorningCheck: now } });
+          //   await bot.api.sendMessage(Number(user.telegramId), "🌅 Доброе утро! Время планировать рабочий день.", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
+          //   await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы начать чек-ин:", { reply_markup: { inline_keyboard: [[{ text: "📝 Начать план", callback_data: "start_morning" }]] } });
+          // }
 
-          // ВЕЧЕРНЯЯ РАССЫЛКА (только если нет выполненных задач)
-          if (currentTimeStr >= user.workEnd && (!user.lastEveningCheck || user.lastEveningCheck < todayStart)) {
-            // Флаг обновляем сразу, чтобы перезапуск бота не привел к повторной рассылке
-            await prisma.user.update({ where: { id: user.id }, data: { lastEveningCheck: now } });
+          // // ВЕЧЕРНЯЯ РАССЫЛКА (только если нет выполненных задач)
+          // if (currentTimeStr >= user.workEnd && (!user.lastEveningCheck || user.lastEveningCheck < todayStart)) {
+          //   // Флаг обновляем сразу, чтобы перезапуск бота не привел к повторной рассылке
+          //   await prisma.user.update({ where: { id: user.id }, data: { lastEveningCheck: now } });
             
-            // const completedTasksToday = await prisma.task.count({
-            //   where: { assigneeId: user.id, status: "DONE", updatedAt: { gte: userStartOfToday } }
-            // });
-                        const completedTasksToday = await prisma.task.count({
-              where: { 
-                status: "DONE", 
-                updatedAt: { gte: userStartOfToday },
-                OR: [
-                  { assigneeId: user.id },
-                  { assigneeId: null, createdById: user.id } // <-- ИЗМЕНЕНО
-                ]
-              }
-            });
+          //   // const completedTasksToday = await prisma.task.count({
+          //   //   where: { assigneeId: user.id, status: "DONE", updatedAt: { gte: userStartOfToday } }
+          //   // });
+          //               const completedTasksToday = await prisma.task.count({
+          //     where: { 
+          //       status: "DONE", 
+          //       updatedAt: { gte: userStartOfToday },
+          //       OR: [
+          //         { assigneeId: user.id },
+          //         { assigneeId: null, createdById: user.id } // <-- ИЗМЕНЕНО
+          //       ]
+          //     }
+          //   });
 
-            if (completedTasksToday === 0) {
-              await bot.api.sendMessage(Number(user.telegramId), "🌆 Рабочий день подошёл к концу. Подведем итоги?", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
-              await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы заполнить отчёт:", { reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } });
-            }
-          }
+          //   if (completedTasksToday === 0) {
+          //     await bot.api.sendMessage(Number(user.telegramId), "🌆 Рабочий день подошёл к концу. Подведем итоги?", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
+          //     await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы заполнить отчёт:", { reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } });
+          //   }
+          // }
 
           // ВЕЧЕРНЕЕ НАПОМИНАНИЕ
           const currentMins = timeToMinutes(currentTimeStr);
