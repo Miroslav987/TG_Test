@@ -1,7 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { prisma } from "./index";
+import { format } from "date-fns";
 
-export async function generateProjectReport(projectId: string) {
+export async function generateProjectReport(projectId: string, startDate: Date, endDate: Date) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
@@ -14,13 +15,11 @@ export async function generateProjectReport(projectId: string) {
   });
   if (!project) throw new Error("Проект не найден");
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
   const userIds = project.users.map(u => u.id);
 
-  // 1. Стандартные ответы через чек-ины
+  // ИСПОЛЬЗУЕМ СТРОГИЙ ДИАПАЗОН startDate - endDate
   const checkIns = await prisma.checkIn.findMany({
-    where: { userId: { in: userIds }, createdAt: { gte: today } },
+    where: { userId: { in: userIds }, createdAt: { gte: startDate, lte: endDate } },
     include: {
       user: { select: { name: true } },
       answers: { 
@@ -31,12 +30,11 @@ export async function generateProjectReport(projectId: string) {
     orderBy: { createdAt: 'asc' }
   });
 
-  // 2. Ответы на плановые опросы (без чек-ина)
   const standaloneAnswers = await prisma.answer.findMany({
     where: {
       userId: { in: userIds },
       checkInId: null,
-      createdAt: { gte: today },
+      createdAt: { gte: startDate, lte: endDate },
       OR: [ { question: { includeInReport: true } }, { questionId: null } ]
     },
     include: {
@@ -69,18 +67,19 @@ export async function generateProjectReport(projectId: string) {
     answer: a.value
   }));
 
-  // ЗАЩИТА: Если нет вообще никаких данных, не дёргаем ИИ
+  const header = `📅 Период: ${format(startDate, 'dd.MM.yyyy')} – ${format(endDate, 'dd.MM.yyyy')}\n\n`;
+
   if (safeTasks.length === 0 && safeCheckIns.length === 0 && safeStandaloneAnswers.length === 0) {
-    return "⚠️ В проекте нет активных задач, а за выбранный период нет ни одного ответа — отчёт не сгенерирован, генерировать не из чего.";
+    return `${header}⚠️ В проекте нет активных задач, а за выбранный период нет ни одного ответа — отчёт не сгенерирован, генерировать не из чего.`;
   }
 
   const prompt = `
-    Ты ассистент IT-команды. Составь четкий и лаконичный отчет по проекту "${project.name}".
+    Ты ассистент IT-команды. Составь четкий и лаконичный отчет по проекту "${project.name}" за выбранный период.
     
     📋 Список задач в проекте:
     ${JSON.stringify(safeTasks, null, 2)}
 
-    💬 Данные из чек-инов (планы, итоги дня):
+    💬 Данные из чек-инов:
     ${JSON.stringify(safeCheckIns, null, 2)}
     
     📩 Ответы на опросы (вне чек-инов):
@@ -98,17 +97,13 @@ export async function generateProjectReport(projectId: string) {
 
   try {
     const result = await model.generateContent(prompt);
-    const aiText = result.response.text();
-    
-    // ДОБАВЛЕНО: Детерминированная вставка стрика перед ответом ИИ
-    return `🔥 Текущая серия без пропусков: ${user.streakCount} дней\n\n${aiText}`;   
-
+    return `${header}${result.response.text()}`;
   } catch (error) {
     return "Не удалось сгенерировать отчет из-за ошибки сервиса AI.";
   }
 }
 
-export async function generateEmployeeReport(userId: string, period: "today" | "week") {
+export async function generateEmployeeReport(userId: string, startDate: Date, endDate: Date) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
@@ -118,15 +113,9 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
   });
   if (!user) throw new Error("Сотрудник не найден");
 
-  const since = new Date();
-  if (period === "week") {
-    since.setDate(since.getDate() - 7);
-  }
-  since.setHours(0, 0, 0, 0);
-
-  // 1. Стандартные ответы через чек-ины
+  // ИСПОЛЬЗУЕМ СТРОГИЙ ДИАПАЗОН
   const checkIns = await prisma.checkIn.findMany({
-    where: { userId: userId, createdAt: { gte: since } },
+    where: { userId: userId, createdAt: { gte: startDate, lte: endDate } },
     include: { 
       answers: { 
         where: { OR: [ { question: { includeInReport: true } }, { questionId: null } ] },
@@ -136,12 +125,11 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
     orderBy: { createdAt: 'asc' }
   });
 
-  // 2. Ответы на плановые опросы (без чек-ина)
   const standaloneAnswers = await prisma.answer.findMany({
     where: {
       userId: userId,
       checkInId: null,
-      createdAt: { gte: since },
+      createdAt: { gte: startDate, lte: endDate },
       OR: [ { question: { includeInReport: true } }, { questionId: null } ]
     },
     include: { question: { select: { text: true } } },
@@ -153,7 +141,6 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
     status: t.status,
     project: t.project?.name ?? "Без проекта"
   }));
-
 
   const safeCheckIns = checkIns.map(c => ({
     date: c.createdAt.toISOString().split('T')[0],
@@ -171,14 +158,14 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
     answer: a.value
   }));
 
-  // ЗАЩИТА: Если нет вообще никаких данных, не дёргаем ИИ
+  const header = `📅 Период: ${format(startDate, 'dd.MM.yyyy')} – ${format(endDate, 'dd.MM.yyyy')}\n🔥 Текущая серия без пропусков: ${user.streakCount} дней\n\n`;
+
   if (safeTasks.length === 0 && safeCheckIns.length === 0 && safeStandaloneAnswers.length === 0) {
-    return "⚠️ У сотрудника нет активных задач и за выбранный период нет ни одного ответа — отчёт не сгенерирован, генерировать не из чего.";
+    return `${header}⚠️ У сотрудника нет активных задач и за выбранный период нет ни одного ответа — отчёт не сгенерирован, генерировать не из чего.`;
   }
 
-  const periodText = period === "week" ? "последние 7 дней" : "сегодняшний день";
   const prompt = `
-    Ты ассистент IT-команды. Составь сводный отчет по сотруднику "${user.name}" за ${periodText}.
+    Ты ассистент IT-команды. Составь сводный отчет по сотруднику "${user.name}" за выбранный период.
     
     📋 Текущие задачи сотрудника (по всем проектам):
     ${JSON.stringify(safeTasks, null, 2)}
@@ -191,7 +178,7 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
     
     Сделай структуру:
     1. 🎯 Чем занимался (обзор задач по проектам и их статусы)
-    2. 📅 Сводка по ответам (если период - неделя, разбей по дням или выдели главные тренды)
+    2. 📅 Сводка по ответам (разбей по дням или выдели главные тренды)
     3. ⛔ Блокеры и проблемы за период (если были)
     4. 💬 Важные детали
     
@@ -200,7 +187,7 @@ export async function generateEmployeeReport(userId: string, period: "today" | "
 
   try {
     const result = await model.generateContent(prompt);
-    return result.response.text();
+    return `${header}${result.response.text()}`;
   } catch (error) {
     return "Не удалось сгенерировать отчет из-за ошибки сервиса AI.";
   }
