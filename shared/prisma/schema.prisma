@@ -99,6 +99,7 @@ model Task {
   status         TaskStatus @default(TODO)
   deadline       DateTime?
   acknowledgedAt DateTime?
+  updatedAt      DateTime   @default(now()) @updatedAt
 }
 
 enum QuestionType {

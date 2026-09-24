@@ -1,5 +1,5 @@
 import { Bot, InlineKeyboard } from "grammy";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { startOfDay } from "date-fns";
 import { MyContext, prisma, getMainMenuKeyboard } from "./index"; // <-- Заменили импорт
 
@@ -28,6 +28,8 @@ export function startScheduler(bot: Bot<MyContext>) {
         const currentTimeStr = formatInTimeZone(now, user.timezone, 'HH:mm');
         const todayStart = startOfDay(now);
         const todayStr = formatInTimeZone(now, user.timezone, 'yyyy-MM-dd');
+
+        const userStartOfToday = fromZonedTime(`${todayStr} 00:00:00`, user.timezone);
 
           // ==========================================
         // 0. АКТУАЛИЗАЦИЯ ОТСУТСТВИЙ
@@ -73,42 +75,55 @@ export function startScheduler(bot: Bot<MyContext>) {
         if (user.pausedUntil && user.pausedUntil > now) continue;
 
 
+        // ==========================================
+        // 1. СТАНДАРТНЫЕ УТРЕННИЕ И ВЕЧЕРНИЕ ЧЕК-ИНЫ
+        // ==========================================
         if (user.workDays.includes(currentDay)) {
           
-          if (currentTimeStr >= user.workStart && (!user.lastMorningCheck || user.lastMorningCheck < todayStart)) {
+          // УТРЕННЯЯ РАССЫЛКА (с управляемым флагом)
+          const ENABLE_MORNING = process.env.ENABLE_MORNING_CHECKIN === "true";
+          
+          if (ENABLE_MORNING && currentTimeStr >= user.workStart && (!user.lastMorningCheck || user.lastMorningCheck < todayStart)) {
             await prisma.user.update({ where: { id: user.id }, data: { lastMorningCheck: now } });
-            
-            await bot.api.sendMessage(Number(user.telegramId), "🌅 Доброе утро! Время планировать рабочий день.", { 
-              reply_markup: getMainMenuKeyboard(user.isAdmin) // <-- ИСПОЛЬЗУЕМ ФУНКЦИЮ
-            });
-            await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы начать чек-ин:", { 
-              reply_markup: { inline_keyboard: [[{ text: "📝 Начать план", callback_data: "start_morning" }]] } 
-            });
+            await bot.api.sendMessage(Number(user.telegramId), "🌅 Доброе утро! Время планировать рабочий день.", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
+            await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы начать чек-ин:", { reply_markup: { inline_keyboard: [[{ text: "📝 Начать план", callback_data: "start_morning" }]] } });
           }
 
+          // ВЕЧЕРНЯЯ РАССЫЛКА (только если нет выполненных задач)
           if (currentTimeStr >= user.workEnd && (!user.lastEveningCheck || user.lastEveningCheck < todayStart)) {
+            // Флаг обновляем сразу, чтобы перезапуск бота не привел к повторной рассылке
             await prisma.user.update({ where: { id: user.id }, data: { lastEveningCheck: now } });
             
-            await bot.api.sendMessage(Number(user.telegramId), "🌆 Рабочий день подошёл к концу. Подведем итоги?", { 
-              reply_markup: getMainMenuKeyboard(user.isAdmin) // <-- ИСПОЛЬЗУЕМ ФУНКЦИЮ
+            const completedTasksToday = await prisma.task.count({
+              where: { assigneeId: user.id, status: "DONE", updatedAt: { gte: userStartOfToday } }
             });
-            await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы заполнить отчёт:", { 
-              reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } 
-            });
+
+            if (completedTasksToday === 0) {
+              await bot.api.sendMessage(Number(user.telegramId), "🌆 Рабочий день подошёл к концу. Подведем итоги?", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
+              await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы заполнить отчёт:", { reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } });
+            }
           }
 
+          // ВЕЧЕРНЕЕ НАПОМИНАНИЕ
           const currentMins = timeToMinutes(currentTimeStr);
           const endMins = timeToMinutes(user.workEnd);
           if (currentMins >= endMins + 60 && (!user.lastEveningReminder || user.lastEveningReminder < todayStart)) {
+            // Флаг обновляем сразу
+            await prisma.user.update({ where: { id: user.id }, data: { lastEveningReminder: now } });
+
             const checkInExists = await prisma.checkIn.findFirst({ where: { userId: user.id, type: "EVENING", createdAt: { gte: todayStart } } });
-            if (!checkInExists) {
-              await prisma.user.update({ where: { id: user.id }, data: { lastEveningReminder: now } });
+            const completedTasksToday = await prisma.task.count({
+              where: { assigneeId: user.id, status: "DONE", updatedAt: { gte: userStartOfToday } }
+            });
+
+            // Напоминаем только если отчёта нет И задач выполненных нет
+            if (!checkInExists && completedTasksToday === 0) {
               await bot.api.sendMessage(Number(user.telegramId), "🔔 Напоминание: ты забыл заполнить вечерний отчёт! Пожалуйста, удели минутку.", 
                 { reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } });
             }
           }
         }
-
+        
         // ==========================================
         // 2. КАСТОМНЫЕ ВОПРОСЫ (ПЕРВИЧНАЯ ОТПРАВКА)
         // ==========================================
