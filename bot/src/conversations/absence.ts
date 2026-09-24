@@ -51,8 +51,10 @@ export async function absenceConversation(conversation: Conversation<MyContext>,
 
   let parsedData: any = null;
   try {
-    const result = await conversation.external(() => model.generateContent(prompt));
-    const rawText = result.response.text();
+    const rawText = await conversation.external(async () => {
+      const result = await model.generateContent(prompt);
+      return result.response.text();
+    });
     // Очищаем от возможных Markdown-кавычек ```json ... ```
     const cleanedText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
     parsedData = JSON.parse(cleanedText);
