@@ -13,18 +13,24 @@ enum AbsenceType {
   PARTIAL_HOURS
 }
 
+enum AbsenceStatus {
+  ACTIVE
+  CANCELLED
+}
+
 model Absence {
-  id         String      @id @default(uuid())
-  userId     String
-  user       User        @relation(fields: [userId], references: [id])
-  type       AbsenceType
-  startDate  DateTime
-  endDate    DateTime
-  startTime  String?
-  endTime    String?
-  reason     String?
-  createdAt  DateTime    @default(now())
-  lastReconfirmedAt DateTime?
+  id                String        @id @default(uuid())
+  userId            String
+  user              User          @relation(fields: [userId], references: [id])
+  type              AbsenceType
+  status            AbsenceStatus @default(ACTIVE) // <-- НОВОЕ ПОЛЕ
+  startDate         DateTime
+  endDate           DateTime
+  startTime         String?
+  endTime           String?
+  reason            String?
+  createdAt         DateTime      @default(now())
+  lastReconfirmedAt DateTime?     // <-- НОВОЕ ПОЛЕ
 }
 
 model User {
