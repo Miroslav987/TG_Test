@@ -57,6 +57,7 @@ export async function absenceConversation(conversation: Conversation<MyContext>,
     const cleanedText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
     parsedData = JSON.parse(cleanedText);
   } catch (e) {
+    console.error("Ошибка в absence.ts при обращении к Gemini:", e);
     await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
     await ctx.reply("Не разобрал даты, попробуй написать конкретнее, например «с 25 по 27 сентября».");
     return;
