@@ -100,7 +100,8 @@ model Task {
   status         TaskStatus @default(TODO)
   deadline       DateTime?
   acknowledgedAt DateTime?
-  updatedAt      DateTime   @default(now()) @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   createdById    String?    // <-- НОВОЕ ПОЛЕ
   creator        User?      @relation("CreatedTasks", fields: [createdById], references: [id]) // <-- НОВОЕ ПОЛЕ
   @@index([assigneeId]) // <-- НОВЫЙ ИНДЕКС
