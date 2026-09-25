@@ -1,10 +1,9 @@
 import { prisma } from "@standup/shared";
 import { createUser, toggleUserStatus, deleteUser, toggleAdmin } from "../actions/users";
 import EditUser from "../components/EditUser";
-import DeleteUserButton from "@/components/DeleteUserButton";
+import Link from "next/link"; // <-- ДОБАВЛЕН ИМПОРТ
 
 export default async function UsersPage() {
-  // ДОБАВЛЕНО: _count для проверок истории
   const users = await prisma.user.findMany({ 
     include: { 
       roles: true, 
@@ -21,30 +20,35 @@ export default async function UsersPage() {
     const canDelete = user._count.checkIns === 0 && user._count.tasks === 0;
 
     return (
-      <div className={`border border-gray-200 bg-white p-5 rounded-lg shadow-sm ${!isActive ? 'opacity-60 grayscale' : ''}`}>
-        <div className="flex justify-between items-start">
-          <div className="flex items-center gap-2">
-            <strong className="text-lg block">{user.name}</strong>
-            {user.isAdmin && <span className="bg-purple-100 text-purple-800 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded">Admin</span>}
+      <div className={`border border-gray-200 bg-white p-5 rounded-lg shadow-sm flex flex-col justify-between ${!isActive ? 'opacity-60 grayscale' : ''}`}>
+        <div>
+          <div className="flex justify-between items-start">
+            <div className="flex items-center gap-2">
+              <strong className="text-lg block">{user.name}</strong>
+              {user.isAdmin && <span className="bg-purple-100 text-purple-800 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded">Admin</span>}
+            </div>
+            {!isActive && <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">Неактивен</span>}
           </div>
-          {!isActive && <span className="bg-red-100 text-red-800 text-xs px-2 py-1 rounded">Неактивен</span>}
-        </div>
-        <div className="text-sm text-gray-500 mt-2 mb-2">
-          <div className="flex flex-wrap gap-1 mb-2">
-            {user.roles.length > 0 ? (
-              user.roles.map((r: any) => (
-                <span key={r.id} className="bg-gray-100 px-2 py-1 rounded text-xs">{r.name}</span>
-              ))
-            ) : (
-              <span className="bg-gray-100 px-2 py-1 rounded text-xs">Нет роли</span>
-            )}
+          <div className="text-sm text-gray-500 mt-2 mb-2">
+            <div className="flex flex-wrap gap-1 mb-2">
+              {user.roles.length > 0 ? (
+                user.roles.map((r: any) => (
+                  <span key={r.id} className="bg-gray-100 px-2 py-1 rounded text-xs">{r.name}</span>
+                ))
+              ) : (
+                <span className="bg-gray-100 px-2 py-1 rounded text-xs">Нет роли</span>
+              )}
+            </div>
+            Таймзона: {user.timezone} | {user.workStart}-{user.workEnd}
           </div>
-          Таймзона: {user.timezone} | {user.workStart}-{user.workEnd}
         </div>
-
         
-        
-        <div className="flex gap-4 items-center mt-2 border-t pt-2">
+        <div className="flex gap-4 items-center mt-2 border-t pt-2 flex-wrap">
+          {/* НОВАЯ ССЫЛКА НА ЗАДАЧИ */}
+          <Link href={`/users/${user.id}/tasks`} className="text-xs font-medium text-blue-600 hover:underline mt-2">
+            📋 Задачи
+          </Link>
+          
           <EditUser user={user} roles={roles} />
           
           <form action={toggleUserStatus} className="inline mt-2">
@@ -63,16 +67,20 @@ export default async function UsersPage() {
             </button>
           </form>
 
-          {/* НОВАЯ КНОПКА УДАЛЕНИЯ */}
           {canDelete && (
-            <DeleteUserButton userId={user.id} userName={user.name} />
+            <form action={deleteUser} className="inline mt-2" onSubmit={(e) => !confirm(`Точно удалить сотрудника "${user.name}"?`) && e.preventDefault()}>
+              <input type="hidden" name="userId" value={user.id} />
+              <button type="submit" className="text-xs text-red-600 hover:underline">
+                🗑 Удалить
+              </button>
+            </form>
           )}
         </div>
         
         {user.inviteToken && (
           <div className="mt-4 bg-blue-50 border border-blue-100 text-blue-800 p-3 rounded text-sm">
             ⏳ Ожидает привязки Telegram.<br/>
-            Отправь ссылку: <b className="select-all">t.me/espada_it_solutions_bot?start={user.inviteToken}</b>
+            Отправь ссылку: <b className="select-all">t.me/{process.env.NEXT_PUBLIC_BOT_USERNAME}?start={user.inviteToken}</b>
           </div>
         )}
         
@@ -108,14 +116,14 @@ export default async function UsersPage() {
         <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition">Создать</button>
       </form>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {activeUsers.map(user => <UserCard key={user.id} user={user} isActive={true} />)}
       </div>
 
       {inactiveUsers.length > 0 && (
         <div className="mt-12">
           <h2 className="text-xl font-bold mb-4 text-gray-500 border-b pb-2">Уволенные / Неактивные</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             {inactiveUsers.map(user => <UserCard key={user.id} user={user} isActive={false} />)}
           </div>
         </div>
