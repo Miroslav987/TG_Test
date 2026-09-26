@@ -3,11 +3,14 @@ import { InlineKeyboard } from "grammy";
 import { MyContext, prisma } from "../index";
 import { MENU_TRIGGERS } from "../index";
 
-export async function editTaskConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
-  const taskId = ctx.session.editTaskId;
+export async function editTaskConversation(
+  conversation: Conversation<MyContext>,
+  ctx: MyContext,
+  taskId: string          // ← принимаем напрямую, а не из ctx.session
+) {
   if (!taskId) return;
 
-  const task = await conversation.external(() => 
+  const task = await conversation.external(() =>
     prisma.task.findUnique({ where: { id: taskId }, include: { project: true } })
   );
 
@@ -43,11 +46,11 @@ export async function editTaskConversation(conversation: Conversation<MyContext>
     }
 
     const newText = textCtx.message!.text.trim();
-    await conversation.external(() => 
+    await conversation.external(() =>
       prisma.task.update({ where: { id: taskId }, data: { title: newText } })
     );
     await ctx.reply("✅ Задача обновлена");
-    
+
   } else if (action === "edit_status") {
     const statusKb = new InlineKeyboard()
       .text("TODO (К выполнению)", "TODO").row()
@@ -59,7 +62,7 @@ export async function editTaskConversation(conversation: Conversation<MyContext>
     const newStatus = statusCtx.callbackQuery.data;
     try { await statusCtx.answerCallbackQuery(); } catch (e) {}
 
-    await conversation.external(() => 
+    await conversation.external(() =>
       prisma.task.update({ where: { id: taskId }, data: { status: newStatus as any } })
     );
     await ctx.reply("✅ Задача обновлена");

@@ -292,11 +292,17 @@ bot.callbackQuery(/^delete_task_(.+)$/, async (ctx) => {
   }
 });
 
+// bot.callbackQuery(/^edit_task_(.+)$/, async (ctx) => {
+//   const id = ctx.match[1];
+//   ctx.session.editTaskId = id;
+//   try { await ctx.answerCallbackQuery(); } catch (e) {}
+//   await ctx.conversation.enter("editTask");
+// });
+
 bot.callbackQuery(/^edit_task_(.+)$/, async (ctx) => {
   const id = ctx.match[1];
-  ctx.session.editTaskId = id;
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.conversation.enter("editTask");
+  await ctx.conversation.enter("editTask", id); // передаём id явно
 });
 
 bot.callbackQuery(/^del_project_(.+)$/, async (ctx) => {
