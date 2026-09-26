@@ -5,12 +5,13 @@ import { jwtVerify } from 'jose';
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const session = request.cookies.get('session')?.value;
+  const baseUrl = process.env.APP_URL || request.url;
 
   const isLoginPage = pathname === '/login';
 
   // 1. Если сессии нет и пользователь пытается зайти на защищённую страницу
   if (!session && !isLoginPage) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    return NextResponse.redirect(new URL('/login', baseUrl));
   }
 
   if (session) {
@@ -21,21 +22,18 @@ export async function middleware(request: NextRequest) {
       const isAdminUser = payload.isAdmin === true;
 
       // 2. ОГРАНИЧЕНИЕ ПРАВ ДОСТУПА ДЛЯ НЕ-АДМИНОВ
-      // Если это не админ, и он пытается открыть любой URL кроме своих задач
       if (!isAdminUser && pathname !== '/my-tasks') {
-        return NextResponse.redirect(new URL('/my-tasks', request.url));
+        return NextResponse.redirect(new URL('/my-tasks', baseUrl));
       }
 
       // 3. Если пользователь УЖЕ залогинен и пытается открыть /login -> отправляем на нужную страницу
       if (isLoginPage) {
-        // Админа отправляем на главную, обычного юзера - в его таски
         const redirectUrl = isAdminUser ? '/' : '/my-tasks';
-        return NextResponse.redirect(new URL(redirectUrl, request.url));
+        return NextResponse.redirect(new URL(redirectUrl, baseUrl));
       }
 
       // 4. Прокидываем данные пользователя в заголовки запроса
       const requestHeaders = new Headers(request.headers);
-      // Берём payload.sub (он надёжнее, так как мы сетили его через setSubject(user.id))
       requestHeaders.set('x-user-id', payload.sub as string);
 
       return NextResponse.next({
@@ -45,7 +43,7 @@ export async function middleware(request: NextRequest) {
       });
     } catch (error) {
       // Если токен невалиден / истёк
-      const response = NextResponse.redirect(new URL('/login', request.url));
+      const response = NextResponse.redirect(new URL('/login', baseUrl));
       response.cookies.delete('session');
       return response;
     }
@@ -55,6 +53,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Защищаем всё, КРОМЕ /api/auth/* и статики Next.js (/login теперь обрабатывается внутри middleware)
   matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico).*)'],
 };
