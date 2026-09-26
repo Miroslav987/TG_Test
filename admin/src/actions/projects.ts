@@ -126,6 +126,16 @@ export async function updateTask(formData: FormData) {
   }
 }
 
+export async function updateTaskStatus(formData: FormData) {
+  const taskId = formData.get("taskId") as string;
+  const status = formData.get("status") as any;
+  if (taskId && status) {
+    await prisma.task.update({ where: { id: taskId }, data: { status } });
+    // "layout" обновит кэш на всех страницах (и /my-tasks, и /projects, и /users/[id]/tasks)
+    revalidatePath("/", "layout");
+  }
+}
+
 export async function deleteTask(formData: FormData) {
   const taskId = formData.get("taskId") as string;
   if (taskId) {
