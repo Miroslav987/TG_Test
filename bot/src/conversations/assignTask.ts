@@ -40,11 +40,22 @@ export async function assignTaskConversation(conversation: Conversation<MyContex
     if (page < totalPages - 1) navRow.push(InlineKeyboard.text("Вперёд ➡️", `page_${page + 1}`));
     if (navRow.length > 0) kb.row(...navRow);
 
+    // ДОБАВЛЕНО: Кнопка Отмены
+    kb.row().text("❌ Отмена", "cancel_flow");
+
     const msg = await ctx.reply("Кому назначить задачу?", { reply_markup: kb });
     const resp = await conversation.waitFor(["callback_query:data", "message:text"]);
 
     if (resp.message?.text && MENU_TRIGGERS.includes(resp.message.text)) {
       await ctx.reply("Отменил текущее действие.");
+      return;
+    }
+
+    // ДОБАВЛЕНО: Обработка Отмены
+    if (resp.callbackQuery?.data === "cancel_flow") {
+      try { await resp.answerCallbackQuery(); } catch (e) {}
+      await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
+      await ctx.reply("❌ Отменил назначение задачи.");
       return;
     }
 
@@ -60,10 +71,14 @@ export async function assignTaskConversation(conversation: Conversation<MyContex
         assigneeName = activeUsers.find(u => u.id === assigneeId)?.name || "Сотруднику";
         try { await resp.answerCallbackQuery(); } catch (e) {}
       }
+    } else if (resp.has("message:text")) {
+      // ДОБАВЛЕНО: Явный ответ на нераспознанный текст
+      await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
+      await ctx.reply("Не понял. Выбери сотрудника кнопкой или нажми ❌ Отмена.");
     }
   }
 
-  // 2. ВЫБОР ПРОЕКТА (Одинаково для всех задач)
+  // 2. ВЫБОР ПРОЕКТА
   let projectId: string | null | undefined = undefined;
   let selectedProjectName = "личная";
 
@@ -73,10 +88,21 @@ export async function assignTaskConversation(conversation: Conversation<MyContex
     projects.forEach(p => projectKb.text(p.name, `proj_${p.id}`).row());
     projectKb.text("🙋 Без проекта (личная задача)", "task_no_project").row();
     
+    // ДОБАВЛЕНО: Кнопка Отмены
+    projectKb.row().text("❌ Отмена", "cancel_flow");
+    
     const pMsg = await ctx.reply("Для какого проекта задача?", { reply_markup: projectKb });
     const projCtx = await conversation.waitFor(["callback_query:data", "message:text"]);
 
     if (projCtx.message?.text && MENU_TRIGGERS.includes(projCtx.message.text)) return;
+
+    // ДОБАВЛЕНО: Обработка Отмены
+    if (projCtx.callbackQuery?.data === "cancel_flow") {
+      try { await projCtx.answerCallbackQuery(); } catch (e) {}
+      await ctx.api.deleteMessage(ctx.chat!.id, pMsg.message_id).catch(() => {});
+      await ctx.reply("❌ Отменил назначение задачи.");
+      return;
+    }
 
     if (projCtx.has("callback_query:data")) {
       const data = projCtx.callbackQuery.data;
@@ -98,7 +124,8 @@ export async function assignTaskConversation(conversation: Conversation<MyContex
         projectId = matches[0].id;
         selectedProjectName = matches[0].name;
       } else {
-        await ctx.reply("Не нашёл проект. Пожалуйста, выбери кнопкой:");
+        // ДОБАВЛЕНО: Уточняющий текст
+        await ctx.reply("Не нашёл проект. Пожалуйста, выбери кнопкой или нажми ❌ Отмена:");
       }
     }
   }
@@ -117,7 +144,7 @@ export async function assignTaskConversation(conversation: Conversation<MyContex
         title, 
         projectId, 
         assigneeId, 
-        createdById: admin.id, // <-- Связь с админом
+        createdById: admin.id,
         status: "TODO" 
       },
       include: { assignee: true }

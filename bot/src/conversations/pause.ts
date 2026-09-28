@@ -9,11 +9,10 @@ export async function pauseConversation(conversation: Conversation<MyContext>, c
   );
   if (!user) return;
 
-  await ctx.reply("На сколько дней поставить паузу? (просто число)");
+  await ctx.reply("На сколько дней поставить паузу? (просто число)\n(или напиши /menu, чтобы отменить)");
   
   const daysCtx = await conversation.waitFor("message:text");
 
-  // ПРОВЕРКА НА ТРИГГЕРЫ МЕНЮ
   if (daysCtx.message?.text && MENU_TRIGGERS.includes(daysCtx.message.text)) {
     await ctx.reply("Отменил текущее действие. Нажми на кнопку ещё раз, чтобы начать заново 👆");
     return;

@@ -10,7 +10,6 @@ export async function newTaskConversation(conversation: Conversation<MyContext>,
       include: { projects: { where: { isActive: true } } } 
     })
   );
-  
   if (!user) return;
 
   let projectId: string | null | undefined = undefined;
@@ -19,12 +18,10 @@ export async function newTaskConversation(conversation: Conversation<MyContext>,
   while (projectId === undefined) {
     const projectKb = new InlineKeyboard();
     user.projects.forEach(p => projectKb.text(p.name, `proj_${p.id}`).row());
+    projectKb.text("🙋 Без проекта (личная задача)", "task_no_project").row();
+    projectKb.text("❌ Отмена", "cancel_flow");
     
-    // ДОБАВЛЕНО: Кнопка "Без проекта"
-    projectKb.text("Мои таски (без проекта)", "task_no_project").row();
-    
-    await ctx.reply("Для какого проекта задача?", { reply_markup: projectKb });
-    
+    const msg = await ctx.reply("Для какого проекта задача?", { reply_markup: projectKb });
     const projCtx = await conversation.waitFor(["callback_query:data", "message:text"]);
 
     if (projCtx.message?.text && MENU_TRIGGERS.includes(projCtx.message.text)) {
@@ -32,18 +29,27 @@ export async function newTaskConversation(conversation: Conversation<MyContext>,
       return;
     }
 
+    if (projCtx.callbackQuery?.data === "cancel_flow") {
+      try { await projCtx.answerCallbackQuery(); } catch (e) {}
+      await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
+      await ctx.reply("❌ Отменено.");
+      return;
+    }
+
     if (projCtx.has("callback_query:data")) {
       const data = projCtx.callbackQuery.data;
+      await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
+      
       if (data === "task_no_project") {
         projectId = null;
         selectedProject = null;
-        try { await projCtx.answerCallbackQuery(); } catch (e) {}
       } else if (data.startsWith("proj_")) {
         projectId = data.replace("proj_", "");
         selectedProject = user.projects.find(p => p.id === projectId);
-        try { await projCtx.answerCallbackQuery(); } catch (e) {}
       }
+      try { await projCtx.answerCallbackQuery(); } catch (e) {}
     } else if (projCtx.has("message:text")) {
+      await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
       const text = projCtx.message.text.toLowerCase().trim();
       const matches = user.projects.filter(p => p.name.toLowerCase().includes(text));
       
@@ -51,12 +57,12 @@ export async function newTaskConversation(conversation: Conversation<MyContext>,
         projectId = matches[0].id;
         selectedProject = matches[0];
       } else {
-        await ctx.reply("Не нашёл проект с таким названием (или нашлось несколько). Пожалуйста, выбери кнопкой:");
+        await ctx.reply("Не нашёл проект с таким названием (или нашлось несколько). Пожалуйста, выбери кнопкой или нажми ❌ Отмена:");
       }
     }
   }
 
-  await ctx.reply("Что нужно сделать?");
+  await ctx.reply("Что нужно сделать?\n(или напиши /menu, чтобы отменить)");
   let title = "";
   
   while (!title) {
@@ -76,7 +82,7 @@ export async function newTaskConversation(conversation: Conversation<MyContext>,
 
   await conversation.external(() => 
     prisma.task.create({
-      data: { title, projectId, assigneeId: user.id, status: "TODO" } // projectId может быть null
+      data: { title, projectId, assigneeId: user.id, status: "TODO", createdById: user.id }
     })
   );
 

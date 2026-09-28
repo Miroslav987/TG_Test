@@ -12,7 +12,7 @@ export async function absenceConversation(conversation: Conversation<MyContext>,
   );
   if (!user) return;
 
-  await ctx.reply("Напиши, когда и на сколько тебя не будет — например «меня не будет с 25 по 27 сентября», «завтра выходной», или «сегодня отойду с 14 до 16, потом на связи».");
+  await ctx.reply("Напиши, когда и на сколько тебя не будет — например «меня не будет с 25 по 27 сентября», «завтра выходной», или «сегодня отойду с 14 до 16, потом на связи».\n(или напиши /menu, чтобы отменить)");
   
   const textCtx = await conversation.waitFor("message:text");
   if (textCtx.message?.text && MENU_TRIGGERS.includes(textCtx.message.text)) {
@@ -26,7 +26,7 @@ export async function absenceConversation(conversation: Conversation<MyContext>,
   const msg = await ctx.reply("⏳ Анализирую...");
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const prompt = `
     Сегодняшняя дата (в часовом поясе Asia/Bishkek): ${todayDate}.
@@ -51,15 +51,11 @@ export async function absenceConversation(conversation: Conversation<MyContext>,
 
   let parsedData: any = null;
   try {
-    const rawText = await conversation.external(async () => {
-      const result = await model.generateContent(prompt);
-      return result.response.text();
-    });
-    // Очищаем от возможных Markdown-кавычек ```json ... ```
+    const result = await conversation.external(() => model.generateContent(prompt));
+    const rawText = result.response.text();
     const cleanedText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
     parsedData = JSON.parse(cleanedText);
   } catch (e) {
-    console.error("Ошибка в absence.ts при обращении к Gemini:", e);
     await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
     await ctx.reply("Не разобрал даты, попробуй написать конкретнее, например «с 25 по 27 сентября».");
     return;
@@ -80,13 +76,22 @@ export async function absenceConversation(conversation: Conversation<MyContext>,
     humanDesc = `${parsedData.startDate} отойдешь с ${parsedData.startTime} до ${parsedData.endTime}, дальше на связи`;
   }
 
-  const kb = new InlineKeyboard().text("✅ Да", "yes").text("❌ Нет", "no");
+  const kb = new InlineKeyboard()
+    .text("✅ Да", "yes").text("❌ Нет", "no").row()
+    .text("❌ Отмена", "cancel_flow");
+    
   await ctx.api.editMessageText(ctx.chat!.id, msg.message_id, `Правильно понял: ${humanDesc}?`, { reply_markup: kb });
   
-  const confirmCtx = await conversation.waitForCallbackQuery(["yes", "no"]);
+  const confirmCtx = await conversation.waitForCallbackQuery(["yes", "no", "cancel_flow"]);
   const choice = confirmCtx.match;
+  
   try { await confirmCtx.answerCallbackQuery(); } catch (e) {}
   await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
+
+  if (choice === "cancel_flow") {
+    await ctx.reply("❌ Отменено.");
+    return;
+  }
 
   if (choice === "no") {
     await ctx.reply("Ок, отменил. Попробуй написать ещё раз.");
@@ -111,12 +116,8 @@ export async function absenceConversation(conversation: Conversation<MyContext>,
 
     if (parsedData.type === "FULL_DAY" || parsedData.type === "RANGE") {
       const newPausedUntil = endOfDay(eDate);
-      // Увеличиваем паузу только если новая дата дальше текущей (или паузы не было)
       if (!user.pausedUntil || newPausedUntil > user.pausedUntil) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { pausedUntil: newPausedUntil }
-        });
+        await prisma.user.update({ where: { id: user.id }, data: { pausedUntil: newPausedUntil } });
       }
     }
   });

@@ -2,7 +2,7 @@ import { Conversation } from "@grammyjs/conversations";
 import { InlineKeyboard } from "grammy";
 import { MyContext, prisma } from "../index";
 import { MENU_TRIGGERS } from "../index";
-import { sendTelegramMessage } from "@standup/shared"; // <-- ДОБАВЛЕНО
+import { sendTelegramMessage } from "@standup/shared";
 
 export async function newProjectConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
   const user = await conversation.external(() => 
@@ -10,7 +10,7 @@ export async function newProjectConversation(conversation: Conversation<MyContex
   );
   if (!user) return;
 
-  await ctx.reply("Как назвать проект?");
+  await ctx.reply("Как назвать проект?\n(или напиши /menu, чтобы отменить)");
   
   const nameCtx = await conversation.waitFor("message:text");
 
@@ -31,7 +31,6 @@ export async function newProjectConversation(conversation: Conversation<MyContex
     })
   );
 
-  // === НОВЫЙ БЛОК ДОБАВЛЕНИЯ УЧАСТНИКОВ ===
   const activeUsers = await conversation.external(() =>
     prisma.user.findMany({ where: { isActive: true, id: { not: user.id } } })
   );
@@ -47,6 +46,7 @@ export async function newProjectConversation(conversation: Conversation<MyContex
         kb.text(`${check}${u.name}`, `addU_${u.id}`).row();
       });
       kb.text("➡️ Готово", "submit_users").row();
+      kb.text("❌ Отмена", "cancel_flow");
       return kb;
     };
 
@@ -54,8 +54,15 @@ export async function newProjectConversation(conversation: Conversation<MyContex
     msgId = msg.message_id;
 
     while (true) {
-      const resp = await conversation.waitForCallbackQuery(/addU_.+|submit_users/);
+      const resp = await conversation.waitForCallbackQuery(/addU_.+|submit_users|cancel_flow/);
       const data = resp.callbackQuery.data;
+      
+      if (data === "cancel_flow") {
+        await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
+        try { await resp.answerCallbackQuery(); } catch (e) {}
+        await ctx.reply("❌ Отменено.");
+        return;
+      }
       
       if (data === "submit_users") {
         await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
@@ -82,7 +89,6 @@ export async function newProjectConversation(conversation: Conversation<MyContex
         })
       );
 
-      // Уведомляем добавленных сотрудников
       const usersToNotify = activeUsers.filter(u => selectedIds.includes(u.id));
       for (const u of usersToNotify) {
         if (u.telegramId) {
@@ -94,7 +100,6 @@ export async function newProjectConversation(conversation: Conversation<MyContex
     }
   }
 
-  // Финальное сообщение
   await ctx.reply(`✅ Проект «${name}» создан, ты в нём участник.`, {
     reply_markup: {
       inline_keyboard: [[{ text: "🗑 Удалить проект", callback_data: `del_project_${project.id}` }]]

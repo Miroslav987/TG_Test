@@ -14,7 +14,6 @@ export async function viewReportsConversation(conversation: Conversation<MyConte
     return;
   }
 
-  // 1. Выбор сотрудника
   const activeUsers = await conversation.external(() => 
     prisma.user.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } })
   );
@@ -24,60 +23,75 @@ export async function viewReportsConversation(conversation: Conversation<MyConte
     return;
   }
 
-  const userKb = new InlineKeyboard();
-  activeUsers.forEach((u: any) => userKb.text(u.name, `rep_user_${u.id}`).row());
-
-  const userMsg = await ctx.reply("Выбери сотрудника:", { reply_markup: userKb });
-  const userCtx = await conversation.waitFor(["callback_query:data", "message:text"]);
-
-  if (userCtx.message?.text && MENU_TRIGGERS.includes(userCtx.message.text)) {
-    await ctx.reply("Отменил текущее действие. Нажми на кнопку ещё раз, чтобы начать заново 👆");
-    return;
-  }
-
-  let employeeId = "";
+  let employeeId: string | undefined = undefined;
   let employeeName = "";
 
-  if (userCtx.has("callback_query:data")) {
-    employeeId = userCtx.callbackQuery.data.replace("rep_user_", "");
-    employeeName = activeUsers.find((u: any) => u.id === employeeId)?.name || "Сотрудник";
-    try { await userCtx.answerCallbackQuery(); } catch (e) {}
-  } else {
-    await ctx.reply("Отменено. Пожалуйста, используй кнопки.");
-    return;
-  }
+  while (!employeeId) {
+    const userKb = new InlineKeyboard();
+    activeUsers.forEach((u: any) => userKb.text(u.name, `rep_user_${u.id}`).row());
+    userKb.text("❌ Отмена", "cancel_flow");
 
-  await ctx.api.deleteMessage(ctx.chat!.id, userMsg.message_id).catch(() => {});
+    const userMsg = await ctx.reply("Выбери сотрудника:", { reply_markup: userKb });
+    const userCtx = await conversation.waitFor(["callback_query:data", "message:text"]);
 
-  // 2. Выбор периода
-  const periodKb = new InlineKeyboard()
-    .text("Сегодня", "today").row()
-    .text("Эта неделя", "week").row()
-    .text("Этот месяц", "month");
+    if (userCtx.message?.text && MENU_TRIGGERS.includes(userCtx.message.text)) {
+      await ctx.reply("Отменил текущее действие.");
+      return;
+    }
 
-  const periodMsg = await ctx.reply(`Отчёт по ${employeeName} — за какой период?`, { reply_markup: periodKb });
-  const periodCtx = await conversation.waitFor(["callback_query:data", "message:text"]);
+    if (userCtx.callbackQuery?.data === "cancel_flow") {
+      try { await userCtx.answerCallbackQuery(); } catch (e) {}
+      await ctx.api.deleteMessage(ctx.chat!.id, userMsg.message_id).catch(() => {});
+      await ctx.reply("❌ Отменено.");
+      return;
+    }
 
-  if (periodCtx.message?.text && MENU_TRIGGERS.includes(periodCtx.message.text)) {
-    await ctx.reply("Отменил текущее действие. Нажми на кнопку ещё раз, чтобы начать заново 👆");
-    return;
+    if (userCtx.has("callback_query:data")) {
+      employeeId = userCtx.callbackQuery.data.replace("rep_user_", "");
+      employeeName = activeUsers.find((u: any) => u.id === employeeId)?.name || "Сотрудник";
+      try { await userCtx.answerCallbackQuery(); } catch (e) {}
+      await ctx.api.deleteMessage(ctx.chat!.id, userMsg.message_id).catch(() => {});
+    } else if (userCtx.has("message:text")) {
+      await ctx.api.deleteMessage(ctx.chat!.id, userMsg.message_id).catch(() => {});
+      await ctx.reply("Не понял. Выбери сотрудника кнопкой или нажми ❌ Отмена.");
+    }
   }
 
   let periodChoice = "";
-  if (periodCtx.has("callback_query:data")) {
-    periodChoice = periodCtx.callbackQuery.data;
-    try { await periodCtx.answerCallbackQuery(); } catch (e) {}
-  } else {
-    await ctx.reply("Отменено. Пожалуйста, используй кнопки.");
-    return;
+  
+  while (!periodChoice) {
+    const periodKb = new InlineKeyboard()
+      .text("Сегодня", "today").row()
+      .text("Эта неделя", "week").row()
+      .text("Этот месяц", "month").row()
+      .text("❌ Отмена", "cancel_flow");
+
+    const periodMsg = await ctx.reply(`Отчёт по ${employeeName} — за какой период?`, { reply_markup: periodKb });
+    const periodCtx = await conversation.waitFor(["callback_query:data", "message:text"]);
+
+    if (periodCtx.message?.text && MENU_TRIGGERS.includes(periodCtx.message.text)) {
+      await ctx.reply("Отменил текущее действие.");
+      return;
+    }
+
+    if (periodCtx.callbackQuery?.data === "cancel_flow") {
+      try { await periodCtx.answerCallbackQuery(); } catch (e) {}
+      await ctx.api.deleteMessage(ctx.chat!.id, periodMsg.message_id).catch(() => {});
+      await ctx.reply("❌ Отменено.");
+      return;
+    }
+
+    if (periodCtx.has("callback_query:data")) {
+      periodChoice = periodCtx.callbackQuery.data;
+      try { await periodCtx.answerCallbackQuery(); } catch (e) {}
+      await ctx.api.deleteMessage(ctx.chat!.id, periodMsg.message_id).catch(() => {});
+    } else if (periodCtx.has("message:text")) {
+      await ctx.api.deleteMessage(ctx.chat!.id, periodMsg.message_id).catch(() => {});
+      await ctx.reply("Не понял. Выбери период кнопкой или нажми ❌ Отмена.");
+    }
   }
 
-  // 3. Генерация отчёта
-  await ctx.api.editMessageText(
-    ctx.chat!.id, 
-    periodMsg.message_id, 
-    "⏳ Генерирую отчёт, анализирую чек-ины и задачи... Это может занять несколько секунд."
-  ).catch(() => {});
+  const processingMsg = await ctx.reply("⏳ Генерирую отчёт, анализирую чек-ины и задачи... Это может занять несколько секунд.");
 
   const now = new Date();
   let startDate: Date;
@@ -92,15 +106,13 @@ export async function viewReportsConversation(conversation: Conversation<MyConte
   }
 
   const content = await conversation.external(() => 
-    generateEmployeeReport(employeeId, startDate, endDate)
+    generateEmployeeReport(employeeId!, startDate, endDate)
   );
 
-  // Сохраняем в базу (для веб-админки)
   await conversation.external(() => 
     prisma.report.create({ data: { userId: employeeId, content } })
   );
 
-  // 4. Отправка результата с разбивкой на части (лимит Telegram 4096 символов)
   const MAX_LENGTH = 4000;
   const chunks = [];
   for (let i = 0; i < content.length; i += MAX_LENGTH) {
@@ -112,11 +124,9 @@ export async function viewReportsConversation(conversation: Conversation<MyConte
       await ctx.reply(chunk, { parse_mode: "Markdown" });
     } catch (e) {
       console.warn("Ошибка парсинга Markdown от Gemini, отправляю как простой текст:", e);
-      // Если Gemini прислал сломанный Markdown (например, незакрытые **), шлём без форматирования
       await ctx.reply(chunk); 
     }
   }
 
-  // Убираем сообщение "Генерирую..." для чистоты
-  await ctx.api.deleteMessage(ctx.chat!.id, periodMsg.message_id).catch(() => {});
+  await ctx.api.deleteMessage(ctx.chat!.id, processingMsg.message_id).catch(() => {});
 }
