@@ -4,6 +4,7 @@ dotenv.config({ path: path.join(process.cwd(), "../.env") });
 
 import { Bot, session, Context, Keyboard, InlineKeyboard } from "grammy";
 import { conversations, createConversation } from "@grammyjs/conversations";
+import { formatInTimeZone } from "date-fns-tz";
 import { startScheduler } from "./scheduler";
 import { newTaskConversation } from "./conversations/newTask";
 import { newProjectConversation } from "./conversations/newProject";
@@ -11,15 +12,15 @@ import { editTaskConversation } from "./conversations/editTask";
 import { customQuestionConversation } from "./conversations/customQuestion";
 import { pauseConversation } from "./conversations/pause";
 import { newQuestionConversation } from "./conversations/newQuestion";
-import { viewReportsConversation } from "./conversations/viewReports"; // <-- ДОБАВЛЕНО
-import { eveningConversation } from "./conversations/evening"; // <-- ДОБАВЛЕНО
-import { morningConversation } from "./conversations/morning"; // <-- ДОБАВЛЕНО
+import { viewReportsConversation } from "./conversations/viewReports";
+import { eveningConversation } from "./conversations/evening";
+import { morningConversation } from "./conversations/morning";
 import { prisma, sendTelegramMessage } from "@standup/shared";
 import { absenceConversation } from "./conversations/absence";
-import { formatInTimeZone } from "date-fns-tz";
 import { assignTaskConversation } from "./conversations/assignTask";
+import { GoogleGenerativeAI } from "@google/generative-ai"; // <-- ДОБАВЛЕНО
 
-export type MyContext = Context & { session: { editTaskId?: string; customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
+export type MyContext = Context & { session: { customQuestionId?: string; promptMessageId?: number; [key: string]: any } }; 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
 
 bot.use(session({ initial: () => ({}) }));
@@ -27,24 +28,19 @@ bot.use(conversations());
 
 bot.use(createConversation(newTaskConversation, "newTask"));
 bot.use(createConversation(newProjectConversation, "newProject"));
-bot.use(createConversation(editTaskConversation, "editTask"));
 bot.use(createConversation(customQuestionConversation, "customQuestion"));
 bot.use(createConversation(pauseConversation, "pause"));
 bot.use(createConversation(newQuestionConversation, "newQuestion"));
-bot.use(createConversation(viewReportsConversation, "viewReports")); // <-- ДОБАВЛЕНО
+bot.use(createConversation(viewReportsConversation, "viewReports"));
 bot.use(createConversation(absenceConversation, "absence"));
-
 bot.use(createConversation(morningConversation, "morning"));
 bot.use(createConversation(eveningConversation, "evening"));
+bot.use(createConversation(assignTaskConversation, "assignTask"));
 
-bot.use(createConversation(assignTaskConversation, "assignTask")); // <-- ДОБАВЛЕНО
-
-// ДОБАВЛЕНО: "📤 Назначить задачу"
 export const MENU_TRIGGERS = [
   "➕ Новая задача", "📂 Новый проект", "📋 Мои задачи", "❓ Помощь", "🆕 Новый вопрос", "📊 Отчёты", "📤 Назначить задачу",
   "/newtask", "/newproject", "/mytasks", "/myprojects", "/newquestion", "/reports", "/assign", "/start", "/menu", "/pause", "/unpause", "/absence", "/myabsences"
 ];
-
 
 export function getMainMenuKeyboard(isAdmin: boolean) {
   const kb = new Keyboard()
@@ -54,7 +50,7 @@ export function getMainMenuKeyboard(isAdmin: boolean) {
   
   if (isAdmin) {
     kb.row().text("🆕 Новый вопрос").text("📊 Отчёты");
-    kb.row().text("📤 Назначить задачу"); // <-- ДОБАВЛЕНО
+    kb.row().text("📤 Назначить задачу");
   }
   
   return kb.resized();
@@ -102,20 +98,14 @@ bot.hears("❓ Помощь", async (ctx) => {
     "А ещё я буду присылать опросы по расписанию, чтобы собирать отчёты для команды!";
     
   if (user?.isAdmin) {
-    helpText += "\n\n👑 *Админу:*\n🆕 *Новый вопрос* — создать опрос прямо отсюда\n📊 *Отчёты* — сгенерировать отчёт по сотруднику.";
+    helpText += "\n\n👑 *Админу:*\n🆕 *Новый вопрос* — создать опрос прямо отсюда\n📊 *Отчёты* — сгенерировать отчёт по сотруднику\n📤 *Назначить задачу* — поручить таск коллеге.";
   }
 
   await ctx.reply(helpText, { parse_mode: "Markdown", reply_markup: getMainMenuKeyboard(user?.isAdmin ?? false) });
 });
 
-bot.hears("📤 Назначить задачу", async (ctx) => ctx.conversation.enter("assignTask"));
-bot.command("assign", async (ctx) => ctx.conversation.enter("assignTask"));
-
-
-// ДОБАВЛЕН ОБРАБОТЧИК /absence
 bot.command("absence", async (ctx) => ctx.conversation.enter("absence"));
 
-// === НОВАЯ КОМАНДА: МОИ ОТСУТСТВИЯ ===
 bot.command("myabsences", async (ctx) => {
   const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
   if (!user) return;
@@ -128,7 +118,6 @@ bot.command("myabsences", async (ctx) => {
   const now = new Date();
   const todayStr = formatInTimeZone(now, user.timezone, 'yyyy-MM-dd');
   
-  // Оставляем только те, которые еще не завершились
   const validAbsences = absences.filter(abs => {
     const endStr = formatInTimeZone(abs.endDate, user.timezone, 'yyyy-MM-dd');
     return endStr >= todayStr;
@@ -138,7 +127,7 @@ bot.command("myabsences", async (ctx) => {
     return ctx.reply("Активных отсутствий нет.");
   }
 
-  await ctx.reply(" Твои активные отсутствия:");
+  await ctx.reply("Твои активные отсутствия:");
   
   for (const abs of validAbsences) {
     const sDate = formatInTimeZone(abs.startDate, user.timezone, 'dd.MM.yyyy');
@@ -168,13 +157,17 @@ bot.command("newquestion", async (ctx) => ctx.conversation.enter("newQuestion"))
 bot.hears("📊 Отчёты", async (ctx) => ctx.conversation.enter("viewReports"));
 bot.command("reports", async (ctx) => ctx.conversation.enter("viewReports"));
 
+bot.hears("📤 Назначить задачу", async (ctx) => ctx.conversation.enter("assignTask"));
+bot.command("assign", async (ctx) => ctx.conversation.enter("assignTask"));
+
 bot.command("pause", async (ctx) => ctx.conversation.enter("pause"));
 bot.command("unpause", async (ctx) => {
   const user = await prisma.user.update({ where: { telegramId: ctx.from!.id }, data: { pausedUntil: null } });
   await ctx.reply("✅ Пауза снята, снова на связи.", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
 });
 
-bot.command("myprojects", async (ctx) => {
+// === ВЫНЕСЕННЫЙ ОБРАБОТЧИК МОИХ ПРОЕКТОВ ===
+const myProjectsHandler = async (ctx: MyContext) => {
   const user = await prisma.user.findUnique({ 
     where: { telegramId: ctx.from?.id },
     include: { 
@@ -192,9 +185,10 @@ bot.command("myprojects", async (ctx) => {
   
   const lines = user.projects.map(p => `📂 *${p.name}* — ${p._count.tasks} открытых задач`);
   await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
-});
+};
+bot.command("myprojects", myProjectsHandler);
 
-
+// === ВЫНЕСЕННЫЙ ОБРАБОТЧИК МОИХ ЗАДАЧ ===
 const myTasksHandler = async (ctx: MyContext) => {
   const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
   if (!user) return;
@@ -202,7 +196,6 @@ const myTasksHandler = async (ctx: MyContext) => {
   const tasks = await prisma.task.findMany({
     where: { 
       status: { not: "DONE" },
-      // ИЗМЕНЕНО: берём задачи, где юзер исполнитель, ИЛИ (исполнителя нет, но юзер — создатель)
       OR: [
         { assigneeId: user.id },
         { assigneeId: null, createdById: user.id }
@@ -242,7 +235,6 @@ const myTasksHandler = async (ctx: MyContext) => {
     }
   }
 };
-
 bot.hears("📋 Мои задачи", myTasksHandler);
 bot.command("mytasks", myTasksHandler);
 
@@ -292,17 +284,10 @@ bot.callbackQuery(/^delete_task_(.+)$/, async (ctx) => {
   }
 });
 
-// bot.callbackQuery(/^edit_task_(.+)$/, async (ctx) => {
-//   const id = ctx.match[1];
-//   ctx.session.editTaskId = id;
-//   try { await ctx.answerCallbackQuery(); } catch (e) {}
-//   await ctx.conversation.enter("editTask");
-// });
-
 bot.callbackQuery(/^edit_task_(.+)$/, async (ctx) => {
   const id = ctx.match[1];
   try { await ctx.answerCallbackQuery(); } catch (e) {}
-  await ctx.conversation.enter("editTask", id); // передаём id явно
+  await ctx.conversation.enter("editTask", id);
 });
 
 bot.callbackQuery(/^del_project_(.+)$/, async (ctx) => {
@@ -356,9 +341,6 @@ bot.callbackQuery(/^reqdel_project_(.+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
 });
 
-
-
-// === ФУНКЦИЯ ОТМЕНЫ ОТСУТСТВИЯ ===
 async function cancelAbsence(absenceId: string, ctx: MyContext) {
   const absence = await prisma.absence.update({ 
     where: { id: absenceId }, 
@@ -396,7 +378,6 @@ async function cancelAbsence(absenceId: string, ctx: MyContext) {
   }
 }
 
-// === НОВЫЕ ОБРАБОТЧИКИ CALLBACK_QUERY (Подтверждение отсутствия) ===
 bot.callbackQuery(/^absence_yes_(.+)$/, async (ctx) => {
   await prisma.absence.update({ 
     where: { id: ctx.match[1] }, 
@@ -410,7 +391,73 @@ bot.callbackQuery(/^absence_no_(.+)$/, async (ctx) => {
   await cancelAbsence(ctx.match[1], ctx);
 });
 
+// === НОВЫЕ ОБРАБОТЧИКИ НАМЕРЕНИЙ ИЗ GEMINI ===
+bot.callbackQuery(/^intent_yes_(.+)$/, async (ctx) => {
+  const intent = ctx.match[1];
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  await ctx.deleteMessage().catch(() => {});
+
+  switch (intent) {
+    case "NEW_TASK":
+      await ctx.conversation.enter("newTask");
+      break;
+    case "NEW_PROJECT":
+      await ctx.conversation.enter("newProject");
+      break;
+    case "MY_TASKS":
+      await myTasksHandler(ctx);
+      break;
+    case "MY_PROJECTS":
+      await myProjectsHandler(ctx);
+      break;
+    case "ABSENCE":
+      await ctx.conversation.enter("absence");
+      break;
+    default:
+      await ctx.reply("Произошла ошибка при определении действия.");
+  }
+});
+
+bot.callbackQuery("intent_no", async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  await ctx.deleteMessage().catch(() => {});
+  await ctx.reply("Хорошо, воспользуйся кнопками внизу или напиши /menu.");
+});
+
+// === ОБНОВЛЕННЫЙ CATCH-ALL С ИСПОЛЬЗОВАНИЕМ GEMINI ===
 bot.on("message:text", async (ctx) => {
+  const userText = ctx.message.text.trim();
+
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+
+    const prompt = `Определи намерение пользователя в сообщении ниже. Верни СТРОГО одно слово без пояснений: NEW_TASK (хочет создать задачу), NEW_PROJECT (хочет создать проект), MY_TASKS (хочет посмотреть свои задачи), MY_PROJECTS (хочет посмотреть свои проекты), ABSENCE (сообщает об отсутствии/отпуске/больничном), HELP (не понятно / что-то другое, просит помощи). Сообщение: «${userText}»`;
+
+    const result = await model.generateContent(prompt);
+    const intent = result.response.text().trim().toUpperCase();
+
+    const intentMap: Record<string, string> = {
+      "NEW_TASK": "создать задачу",
+      "NEW_PROJECT": "создать проект",
+      "MY_TASKS": "посмотреть свои задачи",
+      "MY_PROJECTS": "посмотреть свои проекты",
+      "ABSENCE": "сообщить об отсутствии"
+    };
+
+    if (intentMap[intent]) {
+      const kb = new InlineKeyboard()
+        .text("✅ Да", `intent_yes_${intent}`).row()
+        .text("❌ Нет, другое", `intent_no`);
+
+      await ctx.reply(`Похоже, ты хочешь ${intentMap[intent]}. Верно?`, { reply_markup: kb });
+      return; // Выходим, ждём решения пользователя по инлайн-кнопке
+    }
+  } catch (error) {
+    console.warn("Ошибка распознавания намерений через Gemini:", error);
+  }
+
+  // Если Gemini вернул HELP, ерунду или вообще упал - отдаем стандартный ответ
   const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
   await ctx.reply(
     "Не понял тебя 🙂\n\nВоспользуйся кнопками внизу экрана или командами:\n/newtask — добавить задачу\n/newproject — создать проект\n/mytasks — посмотреть список задач\n\nЕсли ждёшь чек-ин — дождись сообщения от меня по расписанию.",
