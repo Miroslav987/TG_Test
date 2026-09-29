@@ -26,7 +26,7 @@ export function formatAbsence(abs: any, tz: string = "Asia/Bishkek") {
 
 export async function parseAbsenceWithGemini(userInput: string, todayStr: string, currentAbsence: any = null) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
   let prompt = `Сегодняшняя дата (в часовом поясе Asia/Bishkek): ${todayStr}.\n`;
   if (currentAbsence) {
