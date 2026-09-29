@@ -20,7 +20,6 @@ export async function customQuestionConversation(conversation: Conversation<MyCo
 
   const answerVal = await askQuestionHelper(conversation, ctx, q);
 
-  // ЕСЛИ ПОЛЬЗОВАТЕЛЬ ОТМЕНИЛ ВОПРОС
   if (answerVal === "_CANCEL_") {
     ctx.session.promptMessageId = undefined;
     ctx.session.customQuestionId = undefined;

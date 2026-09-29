@@ -16,7 +16,7 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
     try { await resp.answerCallbackQuery(); } catch (e) {}
 
     if (resp.match === "cancel_flow") {
-      await ctx.reply("❌ Отменено.");
+      await ctx.reply("❌ Отменил ответ на вопрос.");
       return "_CANCEL_";
     }
 
@@ -34,7 +34,7 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
     try { await resp.answerCallbackQuery(); } catch (e) {}
 
     if (resp.callbackQuery.data === "cancel_flow") {
-      await ctx.reply("❌ Отменено.");
+      await ctx.reply("❌ Отменил ответ на вопрос.");
       return "_CANCEL_";
     }
     
@@ -66,7 +66,7 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
       if (data === "cancel_flow") {
         await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
         try { await resp.answerCallbackQuery(); } catch (e) {}
-        await ctx.reply("❌ Отменено.");
+        await ctx.reply("❌ Отменил ответ на вопрос.");
         return "_CANCEL_";
       }
 
