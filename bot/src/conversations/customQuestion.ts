@@ -3,13 +3,11 @@ import { MyContext, prisma } from "../index";
 import { askQuestionHelper } from "../utils/questions";
 
 export async function customQuestionConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
- 
   const questionId = 
     ctx.match?.[1] || 
     ctx.callbackQuery?.data?.replace("ans_custom_", "") || 
     ctx.session?.customQuestionId;
     
-  
   const promptMessageId = 
     ctx.callbackQuery?.message?.message_id || 
     ctx.session?.promptMessageId;
@@ -22,7 +20,12 @@ export async function customQuestionConversation(conversation: Conversation<MyCo
 
   const answerVal = await askQuestionHelper(conversation, ctx, q);
 
-  if (answerVal === "_CANCEL_") return;
+  // ЕСЛИ ПОЛЬЗОВАТЕЛЬ ОТМЕНИЛ ВОПРОС
+  if (answerVal === "_CANCEL_") {
+    ctx.session.promptMessageId = undefined;
+    ctx.session.customQuestionId = undefined;
+    return;
+  }
 
   await conversation.external(() => 
     prisma.answer.create({ 
@@ -32,12 +35,10 @@ export async function customQuestionConversation(conversation: Conversation<MyCo
 
   await ctx.reply("✅ Ответ сохранен, спасибо!");
 
-  // Удаляем исходное сообщение-приглашение после успешного ответа
   if (promptMessageId) {
     await ctx.api.deleteMessage(ctx.chat!.id, promptMessageId).catch(() => {});
   }
   
-  // Очищаем сессию на всякий случай
   ctx.session.promptMessageId = undefined;
   ctx.session.customQuestionId = undefined;
 }

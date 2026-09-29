@@ -5,26 +5,40 @@ import { MENU_TRIGGERS } from "../index";
 
 export async function askQuestionHelper(conversation: Conversation<MyContext>, ctx: MyContext, q: any): Promise<string> {
   if (q.type === "YES_NO") {
-    const kb = new InlineKeyboard().text("✅ Да", "yes").text("❌ Нет", "no");
+    const kb = new InlineKeyboard()
+      .text("✅ Да", "yes").text("❌ Нет", "no").row()
+      .text("❌ Отмена", "cancel_flow");
+      
     const msg = await ctx.reply(q.text, { reply_markup: kb });
-    const resp = await conversation.waitForCallbackQuery(["yes", "no"]);
+    const resp = await conversation.waitForCallbackQuery(["yes", "no", "cancel_flow"]);
     
-    // УДАЛЯЕМ СООБЩЕНИЕ ПОСЛЕ ОТВЕТА
     await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
     try { await resp.answerCallbackQuery(); } catch (e) {}
+
+    if (resp.match === "cancel_flow") {
+      await ctx.reply("❌ Отменено.");
+      return "_CANCEL_";
+    }
+
     return resp.match === "yes" ? "Да" : "Нет";
   } 
   else if (q.type === "SELECT") {
     const kb = new InlineKeyboard();
     q.options.forEach((opt: string, idx: number) => kb.text(opt, `sel_${idx}`).row());
-    const msg = await ctx.reply(q.text, { reply_markup: kb });
-    const resp = await conversation.waitForCallbackQuery(/sel_\d+/);
+    kb.text("❌ Отмена", "cancel_flow");
     
-    // УДАЛЯЕМ СООБЩЕНИЕ ПОСЛЕ ОТВЕТА
+    const msg = await ctx.reply(q.text, { reply_markup: kb });
+    const resp = await conversation.waitForCallbackQuery(/sel_\d+|cancel_flow/);
+    
     await ctx.api.deleteMessage(ctx.chat!.id, msg.message_id).catch(() => {});
+    try { await resp.answerCallbackQuery(); } catch (e) {}
+
+    if (resp.callbackQuery.data === "cancel_flow") {
+      await ctx.reply("❌ Отменено.");
+      return "_CANCEL_";
+    }
     
     const idx = parseInt(resp.callbackQuery.data.replace("sel_", ""));
-    try { await resp.answerCallbackQuery(); } catch (e) {}
     return q.options[idx];
   }
   else if (q.type === "MULTI_SELECT") {
@@ -38,6 +52,7 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
         kb.text(`${check}${opt}`, `msel_${idx}`).row();
       });
       kb.text("➡️ Готово (Отправить)", "submit_multi").row();
+      kb.text("❌ Отмена", "cancel_flow");
       return kb;
     };
 
@@ -45,11 +60,17 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
     msgId = msg.message_id;
 
     while (true) {
-      const resp = await conversation.waitForCallbackQuery(/msel_\d+|submit_multi/);
+      const resp = await conversation.waitForCallbackQuery(/msel_\d+|submit_multi|cancel_flow/);
       const data = resp.callbackQuery.data;
       
+      if (data === "cancel_flow") {
+        await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
+        try { await resp.answerCallbackQuery(); } catch (e) {}
+        await ctx.reply("❌ Отменено.");
+        return "_CANCEL_";
+      }
+
       if (data === "submit_multi") {
-        // УДАЛЯЕМ СООБЩЕНИЕ ПОСЛЕ НАЖАТИЯ "ГОТОВО"
         await ctx.api.deleteMessage(ctx.chat!.id, msgId).catch(() => {});
         try { await resp.answerCallbackQuery(); } catch (e) {}
         break;
@@ -70,7 +91,7 @@ export async function askQuestionHelper(conversation: Conversation<MyContext>, c
   }
   else {
     // TEXT, NUMBER, TIME
-    await ctx.reply(q.text);
+    await ctx.reply(q.text + "\n(или напиши /menu, чтобы отменить)");
     const resp = await conversation.waitFor("message:text");
     
     if (resp.message?.text && MENU_TRIGGERS.includes(resp.message.text)) {
