@@ -372,7 +372,7 @@ bot.on("message:text", async (ctx) => {
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
     // ДОБАВЛЕН VIEW_REPORTS В ПРОМТ
     const prompt = `Определи намерение пользователя в сообщении ниже. Верни СТРОГО одно слово без пояснений: NEW_TASK (хочет создать задачу), NEW_PROJECT (создать проект), MY_TASKS (посмотреть свои задачи), MY_PROJECTS (посмотреть свои проекты), NEW_ABSENCE (сообщает о НОВОМ отсутствии), MODIFY_ABSENCE (перенести/изменить СУЩЕСТВУЮЩЕЕ отсутствие), CANCEL_ABSENCE (отменить отсутствие), VIEW_REPORTS (хочет посмотреть отчёт/сводку по сотруднику), HELP (не понятно / другое). Сообщение: «${userText}»`;
