@@ -4,33 +4,58 @@ import { MyContext, prisma } from "../index";
 import { MENU_TRIGGERS } from "../index";
 import { sendTelegramMessage } from "@standup/shared";
 
-export async function newProjectConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
+// ДОБАВЛЕН ТРЕТИЙ ПАРАМЕТР PREFILL
+export async function newProjectConversation(
+  conversation: Conversation<MyContext>, 
+  ctx: MyContext,
+  prefill?: { name?: string }
+) {
   const user = await conversation.external(() => 
     prisma.user.findUnique({ where: { telegramId: ctx.from?.id } })
   );
   if (!user) return;
 
-  await ctx.reply("Как назвать проект?\n(или напиши /menu, чтобы отменить)");
-  
-  const nameCtx = await conversation.waitFor("message:text");
+  let name = prefill?.name || "";
 
-  if (nameCtx.message?.text && MENU_TRIGGERS.includes(nameCtx.message.text)) {
-    await ctx.reply("Отменил текущее действие. Нажми на кнопку ещё раз, чтобы начать заново 👆");
-    return;
-  }
-
-  const name = nameCtx.message!.text.trim();
+  // 1. ОЖИДАНИЕ ИМЕНИ (Пропускается, если есть prefill)
   if (!name) {
-    await ctx.reply("Название не может быть пустым. Отмена.");
-    return;
+    await ctx.reply("Как назвать проект?\n(или напиши /menu, чтобы отменить)");
+    
+    const nameCtx = await conversation.waitFor("message:text");
+
+    if (nameCtx.message?.text && MENU_TRIGGERS.includes(nameCtx.message.text)) {
+      await ctx.reply("Отменил текущее действие. Нажми на кнопку ещё раз, чтобы начать заново 👆");
+      return;
+    }
+
+    name = nameCtx.message!.text.trim();
+    if (!name) {
+      await ctx.reply("Название не может быть пустым. Отмена.");
+      return;
+    }
+  } else {
+    // 2. ФИНАЛЬНОЕ ПОДТВЕРЖДЕНИЕ ТОЛЬКО ДЛЯ PREFILL
+    const confKb = new InlineKeyboard().text("✅ Создать", "yes").text("❌ Отмена", "cancel_flow");
+    const confMsg = await ctx.reply(`Создаю проект «${name}». Всё верно?`, { reply_markup: confKb });
+    
+    const confCtx = await conversation.waitForCallbackQuery(["yes", "cancel_flow"]);
+    await ctx.api.deleteMessage(ctx.chat!.id, confMsg.message_id).catch(() => {});
+    try { await confCtx.answerCallbackQuery(); } catch (e) {}
+    
+    if (confCtx.match === "cancel_flow") {
+      await ctx.reply("❌ Отменено.");
+      return;
+    }
   }
 
+  // 3. СОХРАНЕНИЕ
   const project = await conversation.external(() => 
     prisma.project.create({
       data: { name, tasksRequired: true, users: { connect: { id: user.id } } }
     })
   );
 
+  // 4. ДОБАВЛЕНИЕ УЧАСТНИКОВ (Выполняется всегда)
   const activeUsers = await conversation.external(() =>
     prisma.user.findMany({ where: { isActive: true, id: { not: user.id } } })
   );
