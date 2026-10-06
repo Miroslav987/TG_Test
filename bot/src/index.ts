@@ -29,7 +29,7 @@ export type MyContext = Context & {
     intentText?: string;
     prefillTitle?: string;
     prefillProjectId?: string | null;
-    prefillProjectTitle?: string; // <-- ДОБАВЛЕНО
+    prefillProjectTitle?: string;
     [key: string]: any;
   } 
 }; 
@@ -254,9 +254,7 @@ bot.callbackQuery(/^absence_yes_(.+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
 });
 
-bot.callbackQuery(/^absence_no_(.+)$/, async (ctx) => {
-  await cancelAbsence(ctx.match[1], ctx);
-});
+bot.callbackQuery(/^absence_no_(.+)$/, async (ctx) => { await cancelAbsence(ctx.match[1], ctx); });
 
 bot.callbackQuery(/^abs_(resched|edit|del)_(.+)$/, async (ctx) => {
   const action = ctx.match[1];
@@ -271,7 +269,6 @@ bot.callbackQuery(/^abs_(resched|edit|del)_(.+)$/, async (ctx) => {
   await ctx.conversation.enter("manageAbsence", { action, absenceId });
 });
 
-// НОВЫЙ ОБРАБОТЧИК: ПРЕДЗАПОЛНЕННАЯ ЗАДАЧА
 bot.callbackQuery("intent_yes_NEW_TASK_PREFILLED", async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.deleteMessage().catch(() => {});
@@ -281,7 +278,6 @@ bot.callbackQuery("intent_yes_NEW_TASK_PREFILLED", async (ctx) => {
   await ctx.conversation.enter("newTask", prefill);
 });
 
-// НОВЫЙ ОБРАБОТЧИК: ПРЕДЗАПОЛНЕННЫЙ ПРОЕКТ
 bot.callbackQuery("intent_yes_NEW_PROJECT_PREFILLED", async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.deleteMessage().catch(() => {});
@@ -331,20 +327,19 @@ bot.callbackQuery("intent_no", async (ctx) => {
   
   ctx.session.prefillTitle = undefined;
   ctx.session.prefillProjectId = undefined;
-  ctx.session.prefillProjectTitle = undefined; // <-- ДОБАВЛЕН СБРОС
+  ctx.session.prefillProjectTitle = undefined;
 
   await ctx.reply("Хорошо, воспользуйся кнопками внизу или напиши /menu.");
 });
 
-bot.on("message:text", async (ctx) => {
-  const userText = ctx.message.text.trim();
+// === ВЫНЕСЕННАЯ ФУНКЦИЯ ОБРАБОТКИ ТЕКСТА ===
+async function handleIncomingText(ctx: MyContext, userText: string) {
   ctx.session.intentText = userText; 
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // ОБНОВЛЁННЫЙ ПРОМПТ ДЛЯ JSON
     const prompt = `Проанализируй сообщение пользователя и верни СТРОГО JSON без markdown-обёртки и пояснений:
 {
   "intent": "NEW_TASK" | "NEW_PROJECT" | "MY_TASKS" | "MY_PROJECTS" | "NEW_ABSENCE" | "MODIFY_ABSENCE" | "CANCEL_ABSENCE" | "VIEW_REPORTS" | "HELP",
@@ -385,7 +380,6 @@ bot.on("message:text", async (ctx) => {
       return;
     }
 
-    // НОВАЯ ЛОГИКА ДЛЯ NEW_PROJECT
     if (intent === "NEW_PROJECT" && parsedData.projectTitle) {
       ctx.session.prefillProjectTitle = parsedData.projectTitle;
       const kb = new InlineKeyboard().text("✅ Да, создать", "intent_yes_NEW_PROJECT_PREFILLED").text("✏️ Не так", "intent_no");
@@ -411,6 +405,47 @@ bot.on("message:text", async (ctx) => {
 
   const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
   await ctx.reply("Не понял тебя 🙂\nВоспользуйся кнопками внизу экрана или командами.", { reply_markup: getMainMenuKeyboard(user?.isAdmin ?? false) });
+}
+
+bot.on("message:text", async (ctx) => {
+  await handleIncomingText(ctx, ctx.message.text.trim());
+});
+
+// === НОВЫЙ ОБРАБОТЧИК ГОЛОСОВЫХ СООБЩЕНИЙ ===
+bot.on("message:voice", async (ctx) => {
+  try {
+    const msgInfo = await ctx.reply("⏳ Слушаю и расшифровываю...");
+    
+    const file = await ctx.getFile();
+    const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+    const audioResp = await fetch(fileUrl);
+    const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
+    const audioBase64 = audioBuffer.toString("base64");
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    const result = await model.generateContent([
+      "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
+      { inlineData: { data: audioBase64, mimeType: "audio/ogg" } }
+    ]);
+    const transcript = result.response.text().trim();
+
+    await ctx.api.deleteMessage(ctx.chat!.id, msgInfo.message_id).catch(() => {});
+
+    if (!transcript) {
+      throw new Error("Empty transcript");
+    }
+
+    await ctx.reply(`🎤 Понял: «${transcript}»`);
+    
+    // Прогоняем расшифрованный текст через обычный анализатор намерений
+    await handleIncomingText(ctx, transcript);
+
+  } catch (error) {
+    console.error("Ошибка распознавания голосового:", error);
+    await ctx.reply("Не расслышал, попробуй ещё раз или напиши текстом.");
+  }
 });
 
 bot.start({
