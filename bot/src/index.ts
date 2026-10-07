@@ -345,7 +345,7 @@ async function handleIncomingText(ctx: MyContext, userText: string) { /* Без 
   ctx.session.intentText = userText; 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
     const prompt = `Проанализируй сообщение пользователя и верни СТРОГО JSON без markdown-обёртки и пояснений:
 {
@@ -426,7 +426,7 @@ bot.on("message:voice", async (ctx) => { /* Без изменений */
     const audioBase64 = audioBuffer.toString("base64");
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
     const result = await model.generateContent([
       "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
