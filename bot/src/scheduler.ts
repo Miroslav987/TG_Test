@@ -1,7 +1,6 @@
 import { Bot, InlineKeyboard } from "grammy";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
-import { startOfDay } from "date-fns";
-import { MyContext, prisma, getMainMenuKeyboard } from "./index"; // <-- Заменили импорт
+import { MyContext, prisma, getMainMenuKeyboard } from "./index";
 
 function timeToMinutes(timeStr: string) {
   const [h, m] = timeStr.split(':').map(Number);
@@ -26,116 +25,102 @@ export function startScheduler(bot: Bot<MyContext>) {
       for (const user of users) {
         const currentDay = parseInt(formatInTimeZone(now, user.timezone, 'i')); 
         const currentTimeStr = formatInTimeZone(now, user.timezone, 'HH:mm');
-        const todayStart = startOfDay(now);
         const todayStr = formatInTimeZone(now, user.timezone, 'yyyy-MM-dd');
-
+        
         const userStartOfToday = fromZonedTime(`${todayStr} 00:00:00`, user.timezone);
 
-          // ==========================================
+        // ==========================================
         // 0. АКТУАЛИЗАЦИЯ ОТСУТСТВИЙ
         // ==========================================
         const activeAbsences = await prisma.absence.findMany({
-          where: {
-            userId: user.id,
-            status: "ACTIVE",
-            type: { in: ["FULL_DAY", "RANGE"] }
-          }
+          where: { userId: user.id, status: "ACTIVE", type: { in: ["FULL_DAY", "RANGE"] } }
         });
 
         for (const abs of activeAbsences) {
           const startStr = formatInTimeZone(abs.startDate, user.timezone, 'yyyy-MM-dd');
           const endStr = formatInTimeZone(abs.endDate, user.timezone, 'yyyy-MM-dd');
-
-          // Если сегодня попадает в диапазон отсутствия
           if (todayStr >= startStr && todayStr <= endStr) {
             const lastReconfStr = abs.lastReconfirmedAt ? formatInTimeZone(abs.lastReconfirmedAt, user.timezone, 'yyyy-MM-dd') : null;
-
-            // Если сегодня еще не подтверждали
             if (lastReconfStr !== todayStr) {
-              // Сразу обновляем дату, чтобы тикер не спамил каждую минуту
               await prisma.absence.update({ where: { id: abs.id }, data: { lastReconfirmedAt: now } });
-              
               const dateText = startStr === endStr ? startStr : `${startStr} – ${endStr}`;
-              const kb = new InlineKeyboard()
-                .text("✅ Да, актуально", `absence_yes_${abs.id}`).row()
-                .text("❌ Уже не актуально", `absence_no_${abs.id}`);
-
-              await bot.api.sendMessage(
-                Number(user.telegramId), 
-                `Ты указывал(а), что не будешь работать ${dateText} — это всё ещё актуально?`, 
-                { reply_markup: kb }
-              );
+              const kb = new InlineKeyboard().text("✅ Да, актуально", `absence_yes_${abs.id}`).row().text("❌ Уже не актуально", `absence_no_${abs.id}`);
+              await bot.api.sendMessage(Number(user.telegramId), `Ты указывал(а), что не будешь работать ${dateText} — это всё ещё актуально?`, { reply_markup: kb });
             }
           }
         }
 
-        // ==========================================
-        // ПРОПУСКАЕМ ОСТАЛЬНОЕ, ЕСЛИ ПОЛЬЗОВАТЕЛЬ НА ПАУЗЕ
-        // ==========================================
+        // ПРОПУСК ЕСЛИ ПОЛЬЗОВАТЕЛЬ НА ПАУЗЕ
         if (user.pausedUntil && user.pausedUntil > now) continue;
-
 
         // ==========================================
         // 1. СТАНДАРТНЫЕ УТРЕННИЕ И ВЕЧЕРНИЕ ЧЕК-ИНЫ
         // ==========================================
         if (user.workDays.includes(currentDay)) {
           
-          // УТРЕННЯЯ РАССЫЛКА (с управляемым флагом)
-          // const ENABLE_MORNING = process.env.ENABLE_MORNING_CHECKIN === "true";
+          const ENABLE_MORNING = process.env.ENABLE_MORNING_CHECKIN === "true";
           
-          // if (ENABLE_MORNING && currentTimeStr >= user.workStart && (!user.lastMorningCheck || user.lastMorningCheck < todayStart)) {
-          //   await prisma.user.update({ where: { id: user.id }, data: { lastMorningCheck: now } });
-          //   await bot.api.sendMessage(Number(user.telegramId), "🌅 Доброе утро! Время планировать рабочий день.", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
-          //   await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы начать чек-ин:", { reply_markup: { inline_keyboard: [[{ text: "📝 Начать план", callback_data: "start_morning" }]] } });
-          // }
+          if (ENABLE_MORNING && currentTimeStr >= user.workStart && (!user.lastMorningCheck || user.lastMorningCheck < userStartOfToday)) {
+            await prisma.user.update({ where: { id: user.id }, data: { lastMorningCheck: now } });
+            await bot.api.sendMessage(Number(user.telegramId), "🌅 Доброе утро! Время планировать рабочий день.", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
+            await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы начать чек-ин:", { reply_markup: { inline_keyboard: [[{ text: "📝 Начать план", callback_data: "start_morning" }]] } });
+          }
 
-          // // ВЕЧЕРНЯЯ РАССЫЛКА (только если нет выполненных задач)
-          // if (currentTimeStr >= user.workEnd && (!user.lastEveningCheck || user.lastEveningCheck < todayStart)) {
-          //   // Флаг обновляем сразу, чтобы перезапуск бота не привел к повторной рассылке
-          //   await prisma.user.update({ where: { id: user.id }, data: { lastEveningCheck: now } });
+          if (currentTimeStr >= user.workEnd && (!user.lastEveningCheck || user.lastEveningCheck < userStartOfToday)) {
+            await prisma.user.update({ where: { id: user.id }, data: { lastEveningCheck: now } });
             
-          //   // const completedTasksToday = await prisma.task.count({
-          //   //   where: { assigneeId: user.id, status: "DONE", updatedAt: { gte: userStartOfToday } }
-          //   // });
-          //               const completedTasksToday = await prisma.task.count({
-          //     where: { 
-          //       status: "DONE", 
-          //       updatedAt: { gte: userStartOfToday },
-          //       OR: [
-          //         { assigneeId: user.id },
-          //         { assigneeId: null, createdById: user.id } // <-- ИЗМЕНЕНО
-          //       ]
-          //     }
-          //   });
-
-          //   if (completedTasksToday === 0) {
-          //     await bot.api.sendMessage(Number(user.telegramId), "🌆 Рабочий день подошёл к концу. Подведем итоги?", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
-          //     await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы заполнить отчёт:", { reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } });
-          //   }
-          // }
-
-          // ВЕЧЕРНЕЕ НАПОМИНАНИЕ
-          const currentMins = timeToMinutes(currentTimeStr);
-          const endMins = timeToMinutes(user.workEnd);
-          if (currentMins >= endMins + 60 && (!user.lastEveningReminder || user.lastEveningReminder < todayStart)) {
-            // Флаг обновляем сразу
-            await prisma.user.update({ where: { id: user.id }, data: { lastEveningReminder: now } });
-
-            const checkInExists = await prisma.checkIn.findFirst({ where: { userId: user.id, type: "EVENING", createdAt: { gte: todayStart } } });
             const completedTasksToday = await prisma.task.count({
-              where: { assigneeId: user.id, status: "DONE", updatedAt: { gte: userStartOfToday } }
+              where: { 
+                status: "DONE", 
+                updatedAt: { gte: userStartOfToday },
+                OR: [
+                  { assigneeId: user.id },
+                  { assigneeId: null, createdById: user.id }
+                ]
+              }
             });
 
-            // Напоминаем только если отчёта нет И задач выполненных нет
-            if (!checkInExists && completedTasksToday === 0) {
+            if (completedTasksToday === 0) {
+              await bot.api.sendMessage(Number(user.telegramId), "🌆 Рабочий день подошёл к концу. Подведем итоги?", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
+              await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы заполнить отчёт:", { reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } });
+            }
+          }
+
+          const currentMins = timeToMinutes(currentTimeStr);
+          const endMins = timeToMinutes(user.workEnd);
+          if (currentMins >= endMins + 60 && (!user.lastEveningReminder || user.lastEveningReminder < userStartOfToday)) {
+            await prisma.user.update({ where: { id: user.id }, data: { lastEveningReminder: now } });
+
+            const checkInExists = await prisma.checkIn.findFirst({ where: { userId: user.id, type: "EVENING", createdAt: { gte: userStartOfToday } } });
+            const completedTasksToday = await prisma.task.count({
+              where: { 
+                status: "DONE", 
+                updatedAt: { gte: userStartOfToday },
+                OR: [
+                  { assigneeId: user.id },
+                  { assigneeId: null, createdById: user.id }
+                ]
+              }
+            });
+            // ДОБАВЛЕНО: Проверка наличия ответов за сегодня
+            const answersToday = await prisma.answer.count({
+              where: { userId: user.id, createdAt: { gte: userStartOfToday } }
+            });
+
+            // Напоминаем только если ВСЕ три условия соблюдены
+            if (!checkInExists && completedTasksToday === 0 && answersToday === 0) {
+              const kb = new InlineKeyboard()
+                .text("📊 Заполнить отчет", "start_evening").row()
+                .text("🚫 Ничего не делал(а)", "nothing_done");
+
               await bot.api.sendMessage(Number(user.telegramId), "🔔 Напоминание: ты забыл заполнить вечерний отчёт! Пожалуйста, удели минутку.", 
-                { reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } });
+                { reply_markup: kb });
             }
           }
         }
 
         // ==========================================
-        // 2. КАСТОМНЫЕ ВОПРОСЫ (ПЕРВИЧНАЯ ОТПРАВКА)
+        // 2. КАСТОМНЫЕ ВОПРОСЫ
         // ==========================================
         for (const q of scheduledQuestions) {
           const appliesToUser = 
@@ -208,7 +193,7 @@ export function startScheduler(bot: Bot<MyContext>) {
               const baseTime = lastDelivery.lastReminderAt || lastDelivery.createdAt;
               const ageMs = now.getTime() - baseTime.getTime();
 
-              if (ageMs >= 3 * 60 * 60 * 1000) { // 3 часа = 10 800 000 мс
+              if (ageMs >= 3 * 60 * 60 * 1000) { 
                 await prisma.questionDelivery.update({
                   where: { id: lastDelivery.id },
                   data: { lastReminderAt: now }
