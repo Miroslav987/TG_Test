@@ -1,5 +1,6 @@
 import { Bot, InlineKeyboard } from "grammy";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
+import { startOfDay } from "date-fns";
 import { MyContext, prisma, getMainMenuKeyboard } from "./index";
 
 function timeToMinutes(timeStr: string) {
@@ -66,26 +67,7 @@ export function startScheduler(bot: Bot<MyContext>) {
             await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы начать чек-ин:", { reply_markup: { inline_keyboard: [[{ text: "📝 Начать план", callback_data: "start_morning" }]] } });
           }
 
-          if (currentTimeStr >= user.workEnd && (!user.lastEveningCheck || user.lastEveningCheck < userStartOfToday)) {
-            await prisma.user.update({ where: { id: user.id }, data: { lastEveningCheck: now } });
-            
-            const completedTasksToday = await prisma.task.count({
-              where: { 
-                status: "DONE", 
-                updatedAt: { gte: userStartOfToday },
-                OR: [
-                  { assigneeId: user.id },
-                  { assigneeId: null, createdById: user.id }
-                ]
-              }
-            });
-
-            if (completedTasksToday === 0) {
-              await bot.api.sendMessage(Number(user.telegramId), "🌆 Рабочий день подошёл к концу. Подведем итоги?", { reply_markup: getMainMenuKeyboard(user.isAdmin) });
-              await bot.api.sendMessage(Number(user.telegramId), "👇 Нажми кнопку ниже, чтобы заполнить отчёт:", { reply_markup: { inline_keyboard: [[{ text: "📊 Заполнить отчет", callback_data: "start_evening" }]] } });
-            }
-          }
-
+          // ВЕЧЕРНЕЕ НАПОМИНАНИЕ (Единственное вечернее сообщение)
           const currentMins = timeToMinutes(currentTimeStr);
           const endMins = timeToMinutes(user.workEnd);
           if (currentMins >= endMins + 60 && (!user.lastEveningReminder || user.lastEveningReminder < userStartOfToday)) {
@@ -102,7 +84,6 @@ export function startScheduler(bot: Bot<MyContext>) {
                 ]
               }
             });
-            // ДОБАВЛЕНО: Проверка наличия ответов за сегодня
             const answersToday = await prisma.answer.count({
               where: { userId: user.id, createdAt: { gte: userStartOfToday } }
             });
