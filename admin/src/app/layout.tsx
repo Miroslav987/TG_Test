@@ -25,7 +25,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {sessionCookie && (
           <header className="bg-white shadow-sm mb-8 border-b">
             <div className="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center text-sm font-medium text-gray-600">
-              <div className="font-bold text-gray-800">4.9</div>
+              <div className="font-bold text-gray-800">5.0</div>
               <div className="flex gap-6">
                 {/* Обычный сотрудник видит только свои таски */}
                 <Link href="/my-tasks" className="hover:text-blue-600">Мои таски</Link>
@@ -34,6 +34,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 {isAdmin && (
                   <>
                     <Link href="/" className="hover:text-blue-600">Сотрудники</Link>
+                    <Link href="/daily-reports" className="hover:text-blue-600 font-medium">Дашборд</Link>
                     <Link href="/roles" className="hover:text-blue-600">Роли</Link>
                     <Link href="/questions" className="hover:text-blue-600">Вопросы</Link>
                     <Link href="/projects" className="hover:text-blue-600">Проекты</Link>

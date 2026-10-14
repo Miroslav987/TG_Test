@@ -15,7 +15,7 @@ import { newQuestionConversation } from "./conversations/newQuestion";
 import { viewReportsConversation } from "./conversations/viewReports";
 import { eveningConversation } from "./conversations/evening";
 import { morningConversation } from "./conversations/morning";
-import { prisma, sendTelegramMessage } from "@standup/shared";
+import { prisma, sendTelegramMessage, transcribeAudio } from "@standup/shared";
 import { absenceConversation } from "./conversations/absence";
 import { assignTaskConversation } from "./conversations/assignTask";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -432,20 +432,12 @@ bot.on("message:voice", async (ctx) => {
     const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
     const audioBase64 = audioBuffer.toString("base64");
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" }); // <-- ИЗМЕНЕНА МОДЕЛЬ НА gemini-3.5-flash-lite
-
-    const result = await model.generateContent([
-      "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
-      { inlineData: { data: audioBase64, mimeType: "audio/ogg" } }
-    ]);
-    const transcript = result.response.text().trim();
+    // ИСПОЛЬЗУЕМ ВЫНЕСЕННУЮ ФУНКЦИЮ
+    const transcript = await transcribeAudio(audioBase64);
 
     await ctx.api.deleteMessage(ctx.chat!.id, msgInfo.message_id).catch(() => {});
 
-    if (!transcript) {
-      throw new Error("Empty transcript");
-    }
+    if (!transcript) throw new Error("Empty transcript");
 
     await ctx.reply(`🎤 Понял: «${transcript}»`);
     await handleIncomingText(ctx, transcript);
