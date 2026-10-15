@@ -33,27 +33,63 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
   let draftTasks: DraftTask[] = [];
   let summaryText = "";
   let refCounter = 1;
+  let projectSelectionForRef: number | null = null; // Для переключения клавиатуры на выбор проекта
 
   const renderDraft = async (msgToEdit?: number) => {
-    let text = "📋 Предварительный итог дня:\n\n";
-    if (draftTasks.length === 0) text += "Пока нет задач.\n";
+    let text = "📋 Предварительный итог дня\n";
     
-    draftTasks.forEach(t => {
-      const icon = (t.action === "DONE" || t.action === "CREATE_DONE") ? "✅" : (t.action === "POSTPONE" ? "➡️" : "🆕");
-      const pName = projects.find(p => p.id === t.projectId)?.name || "Без проекта";
-      text += `${t.refId}. ${icon} [${pName}] ${t.title}\n`;
-    });
-    if (summaryText) text += `\n📝 Итог: ${summaryText}`;
+    if (draftTasks.length === 0) {
+      text += "\nПока нет задач.\n";
+    } else {
+      const doneTasks = draftTasks.filter(t => t.action === "DONE");
+      const createDoneTasks = draftTasks.filter(t => t.action === "CREATE_DONE");
+      const createOpenTasks = draftTasks.filter(t => t.action === "CREATE_OPEN");
+      const postponeTasks = draftTasks.filter(t => t.action === "POSTPONE");
+
+      const formatTask = (t: DraftTask) => {
+        const pName = projects.find(p => p.id === t.projectId)?.name || "Без проекта";
+        return `   ${t.refId}. ${t.title} — ${pName}`;
+      };
+
+      if (doneTasks.length > 0) {
+        text += "\n✅ Закрою существующие задачи:\n" + doneTasks.map(formatTask).join("\n");
+      }
+      if (createDoneTasks.length > 0) {
+        text += "\n\n🆕 Создам новые (сразу выполненные):\n" + createDoneTasks.map(formatTask).join("\n");
+      }
+      if (createOpenTasks.length > 0) {
+        text += "\n\n🆕 Создам новые (на будущее):\n" + createOpenTasks.map(formatTask).join("\n");
+      }
+      if (postponeTasks.length > 0) {
+        text += "\n\n➡️ Остаются открытыми:\n" + postponeTasks.map(formatTask).join("\n");
+      }
+    }
+
+    if (summaryText) text += `\n\n📝 Итог: ${summaryText}`;
 
     const kb = new InlineKeyboard();
-    draftTasks.forEach(t => {
-      const toggleAction = (t.action === "DONE" || t.action === "CREATE_DONE") ? "postpone" : "done";
-      const toggleIcon = toggleAction === "postpone" ? "➡️ Перенести" : "✅ Выполнить";
-      kb.text(`🗑 Удалить ${t.refId}`, `draft_del_${t.refId}`).text(`${toggleIcon} ${t.refId}`, `draft_tog_${t.refId}`).row();
-    });
-    kb.text("✅ Всё верно (Сохранить)", "draft_save").row();
-    kb.text("🎙 Добавить ещё (Голос/Текст)", "draft_add").row();
-    kb.text("❌ Отмена", "cancel_flow");
+
+    if (projectSelectionForRef !== null) {
+      // Режим выбора проекта для конкретной задачи
+      projects.forEach(p => kb.text(p.name, `dsp_${projectSelectionForRef}_${p.id}`).row());
+      kb.text("🙋 Без проекта", `dsp_${projectSelectionForRef}_null`).row();
+      kb.text("↩️ Назад", "draft_back").row();
+    } else {
+      // Стандартный режим черновика
+      draftTasks.forEach(t => {
+        const toggleAction = (t.action === "DONE" || t.action === "CREATE_DONE") ? "postpone" : "done";
+        const toggleIcon = toggleAction === "postpone" ? "➡️ Перенести" : "✅ Выполнить";
+        
+        kb.text(`🗑 Удалить ${t.refId}`, `draft_del_${t.refId}`);
+        if (t.action === "CREATE_DONE" || t.action === "CREATE_OPEN") {
+          kb.text(`📂 ${t.refId}`, `draft_proj_${t.refId}`);
+        }
+        kb.text(`${toggleIcon} ${t.refId}`, `draft_tog_${t.refId}`).row();
+      });
+      kb.text("✅ Всё верно (Сохранить)", "draft_save").row();
+      kb.text("🎙 Добавить ещё (Голос/Текст)", "draft_add").row();
+      kb.text("❌ Отмена", "cancel_flow");
+    }
 
     if (msgToEdit) {
       try {
@@ -78,6 +114,7 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
   while (isEditing) {
     const inputCtx = await conversation.waitFor(["message:text", "message:voice", "callback_query:data"]);
 
+    // === ОБРАБОТКА КНОПОК ЧЕРНОВИКА ===
     if (inputCtx.has("callback_query:data")) {
       const data = inputCtx.callbackQuery.data;
       try { await inputCtx.answerCallbackQuery(); } catch(e){}
@@ -134,6 +171,35 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
         continue;
       }
 
+      // Новые обработчики для проекта
+      if (data.startsWith("draft_proj_")) {
+        projectSelectionForRef = parseInt(data.replace("draft_proj_", ""));
+        currentDraftMsgId = await renderDraft(currentDraftMsgId);
+        continue;
+      }
+
+      if (data === "draft_back") {
+        projectSelectionForRef = null;
+        currentDraftMsgId = await renderDraft(currentDraftMsgId);
+        continue;
+      }
+
+      if (data.startsWith("dsp_")) {
+        const parts = data.split("_");
+        const id = parseInt(parts[1]);
+        const pIdStr = parts.slice(2).join("_");
+        const pId = pIdStr === "null" ? null : pIdStr;
+        
+        if (pId === null || projects.some(p => p.id === pId)) {
+          const task = draftTasks.find(t => t.refId === id);
+          if (task) task.projectId = pId;
+        }
+        
+        projectSelectionForRef = null;
+        currentDraftMsgId = await renderDraft(currentDraftMsgId);
+        continue;
+      }
+
       if (data.startsWith("draft_del_")) {
         const id = parseInt(data.replace("draft_del_", ""));
         draftTasks = draftTasks.filter(t => t.refId !== id);
@@ -155,6 +221,7 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
       }
     }
 
+    // === ОБРАБОТКА ВВОДА (ГОЛОС / ТЕКСТ) ===
     if (inputCtx.message) {
       if (currentDraftMsgId) {
         await ctx.api.deleteMessage(ctx.chat!.id, currentDraftMsgId).catch(()=>{});
@@ -173,20 +240,12 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
         try {
           transcript = await conversation.external(async () => {
             const file = await inputCtx.getFile();
-            const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
-            const audioResp = await fetch(fileUrl);
-            if (!audioResp.ok) throw new Error("download failed");
-            const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
-            const audioBase64 = audioBuffer.toString("base64");
-            
-            const { GoogleGenerativeAI } = require("@google/generative-ai");
-            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-            const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
-            const result = await model.generateContent([
-              "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
-              { inlineData: { data: audioBase64, mimeType: "audio/ogg" } }
-            ]);
-            return result.response.text().trim();
+            const url = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error("download failed");
+            const b64 = Buffer.from(await resp.arrayBuffer()).toString("base64");
+            const { transcribeAudio } = require("@standup/shared");
+            return await transcribeAudio(b64);
           });
           await ctx.reply(`🎤 Понял: «${transcript}»`);
         } catch (e) {
@@ -200,6 +259,7 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
 
       if (!transcript.trim()) continue;
 
+      // Анализ через ИИ
       try {
         const analysis = await conversation.external(() => analyzeEveningReport(transcript, openTasks, projects));
         
@@ -300,6 +360,7 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
 
   await ctx.reply("✨ Итоги дня успешно сохранены! Отдыхай.");
 
+  // --- ПОДСЧЕТ СЕРИИ БЕЗ ПРОПУСКОВ ---
   try {
     const now = new Date();
     const todayStr = formatInTimeZone(now, user.timezone, "yyyy-MM-dd");
