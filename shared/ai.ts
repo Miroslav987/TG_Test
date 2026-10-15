@@ -2,6 +2,55 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { prisma } from "./index";
 import { format } from "date-fns";
 
+export async function transcribeAudio(audioBase64: string): Promise<string> {
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+
+  const result = await model.generateContent([
+    "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
+    { inlineData: { data: audioBase64, mimeType: "audio/ogg" } }
+  ]);
+  
+  return result.response.text().trim();
+}
+
+export async function analyzeEveningReport(text: string, openTasks: any[], projects: any[]) {
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-3.5-flash-lite",
+    generationConfig: { responseMimeType: "application/json" } 
+  });
+
+  const safeTasks = openTasks.map(t => ({ id: t.id, title: t.title, project: t.project?.name || "Без проекта" }));
+  const safeProjects = projects.map(p => ({ id: p.id, name: p.name }));
+
+  const prompt = `
+    Ты ассистент, анализирующий вечерний отчёт сотрудника. 
+    Вот что сказал сотрудник: "${text}"
+    
+    Текущие открытые задачи сотрудника: ${JSON.stringify(safeTasks)}
+    Доступные проекты: ${JSON.stringify(safeProjects)}
+
+    Проанализируй текст и сопоставь его с открытыми задачами и проектами. 
+    Верни СТРОГИЙ JSON следующей структуры:
+    {
+      "markDoneIds": ["id задачи", ...], // ID существующих задач, которые он выполнил
+      "postponeIds": ["id задачи", ...], // ID существующих задач, которые он не успел/перенес
+      "createNewDone": [{"title": "Название", "projectId": "ID проекта или null"}], // Задачи, которые он сделал сегодня, но их не было в списке
+      "createNewOpen": [{"title": "Название", "projectId": "ID проекта или null"}], // Новые задачи на будущее, о которых он упомянул
+      "unclearTasks": [{"title": "Название задачи", "reason": "PROJECT"}], // Задачи (новые), для которых ты не смог однозначно определить проект
+      "summary": "Краткий общий итог дня текстом (только суть, без перечисления задач)"
+    }
+    Правила:
+    - Сначала всегда пытайся сопоставить сказанное с открытыми задачами по смыслу, а не по точной формулировке. Новую задачу создавай, только если подходящей открытой нет.
+    - Не выдумывай ID. Используй только те, что переданы.
+    - Если проект непонятен, помещай новую задачу в unclearTasks с reason="PROJECT", а не в createNewDone/Open.
+  `;
+
+  const result = await model.generateContent(prompt);
+  return JSON.parse(result.response.text());
+}
+
 export async function generateProjectReport(projectId: string, startDate: Date, endDate: Date) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
   const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
@@ -17,7 +66,6 @@ export async function generateProjectReport(projectId: string, startDate: Date, 
 
   const userIds = project.users.map(u => u.id);
 
-  // ИСПОЛЬЗУЕМ СТРОГИЙ ДИАПАЗОН startDate - endDate
   const checkIns = await prisma.checkIn.findMany({
     where: { userId: { in: userIds }, createdAt: { gte: startDate, lte: endDate } },
     include: {
@@ -113,7 +161,6 @@ export async function generateEmployeeReport(userId: string, startDate: Date, en
   });
   if (!user) throw new Error("Сотрудник не найден");
 
-  // ИСПОЛЬЗУЕМ СТРОГИЙ ДИАПАЗОН
   const checkIns = await prisma.checkIn.findMany({
     where: { userId: userId, createdAt: { gte: startDate, lte: endDate } },
     include: { 
@@ -191,52 +238,4 @@ export async function generateEmployeeReport(userId: string, startDate: Date, en
   } catch (error) {
     return "Не удалось сгенерировать отчет из-за ошибки сервиса AI.";
   }
-}
-
-export async function transcribeAudio(audioBase64: string): Promise<string> {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
-
-  const result = await model.generateContent([
-    "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
-    { inlineData: { data: audioBase64, mimeType: "audio/ogg" } }
-  ]);
-  
-  return result.response.text().trim();
-}
-
-export async function analyzeEveningReport(text: string, openTasks: any[], projects: any[]) {
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-3.5-flash-lite",
-    generationConfig: { responseMimeType: "application/json" } 
-  });
-
-  const safeTasks = openTasks.map(t => ({ id: t.id, title: t.title, project: t.project?.name || "Без проекта" }));
-  const safeProjects = projects.map(p => ({ id: p.id, name: p.name }));
-
-  const prompt = `
-    Ты ассистент, анализирующий вечерний отчёт сотрудника. 
-    Вот что сказал сотрудник: "${text}"
-    
-    Текущие открытые задачи сотрудника: ${JSON.stringify(safeTasks)}
-    Доступные проекты: ${JSON.stringify(safeProjects)}
-
-    Проанализируй текст и сопоставь его с открытыми задачами и проектами. 
-    Верни СТРОГИЙ JSON следующей структуры:
-    {
-      "markDoneIds": ["id задачи", ...], // ID существующих задач, которые он выполнил
-      "postponeIds": ["id задачи", ...], // ID существующих задач, которые он не успел/перенес
-      "createNewDone": [{"title": "Название", "projectId": "ID проекта или null"}], // Задачи, которые он сделал сегодня, но их не было в списке
-      "createNewOpen": [{"title": "Название", "projectId": "ID проекта или null"}], // Новые задачи на будущее, о которых он упомянул
-      "unclearTasks": [{"title": "Название задачи", "reason": "PROJECT"}], // Задачи (новые), для которых ты не смог однозначно определить проект
-      "summary": "Краткий общий итог дня текстом (только суть, без перечисления задач)"
-    }
-    Правила:
-    - Не выдумывай ID. Используй только те, что переданы.
-    - Если проект непонятен, помещай новую задачу в unclearTasks с reason="PROJECT", а не в createNewDone/Open.
-  `;
-
-  const result = await model.generateContent(prompt);
-  return JSON.parse(result.response.text());
 }

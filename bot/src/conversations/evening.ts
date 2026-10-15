@@ -3,7 +3,7 @@ import { InlineKeyboard } from "grammy";
 import { MyContext, prisma, MENU_TRIGGERS } from "../index";
 import { subDays } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"; 
-import { analyzeEveningReport, transcribeAudio } from "@standup/shared";
+import { analyzeEveningReport } from "@standup/shared";
 
 type DraftTask = {
   refId: number;
@@ -34,9 +34,8 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
   let summaryText = "";
   let refCounter = 1;
 
-  // Функция для отрисовки черновика
   const renderDraft = async (msgToEdit?: number) => {
-    let text = "📋 *Предварительный итог дня:*\n\n";
+    let text = "📋 Предварительный итог дня:\n\n";
     if (draftTasks.length === 0) text += "Пока нет задач.\n";
     
     draftTasks.forEach(t => {
@@ -57,25 +56,28 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
     kb.text("❌ Отмена", "cancel_flow");
 
     if (msgToEdit) {
-      await ctx.api.editMessageText(ctx.chat!.id, msgToEdit, text, { reply_markup: kb, parse_mode: "Markdown" }).catch(()=>{});
-      return msgToEdit;
+      try {
+        await ctx.api.editMessageText(ctx.chat!.id, msgToEdit, text, { reply_markup: kb });
+        return msgToEdit;
+      } catch (e) {
+        await ctx.api.deleteMessage(ctx.chat!.id, msgToEdit).catch(() => {});
+        const sent = await ctx.reply(text, { reply_markup: kb });
+        return sent.message_id;
+      }
     } else {
-      const sent = await ctx.reply(text, { reply_markup: kb, parse_mode: "Markdown" });
+      const sent = await ctx.reply(text, { reply_markup: kb });
       return sent.message_id;
     }
   };
 
   await ctx.reply("🌆 Рабочий день подошёл к концу. Расскажи голосовым сообщением или текстом, что успел сделать, что переносится на потом и какие новые задачи появились.\n(или нажми /menu для отмены)");
 
-  // ГЛАВНЫЙ ЦИКЛ СБОРА И РЕДАКТИРОВАНИЯ
   let isEditing = true;
   let currentDraftMsgId: number | undefined = undefined;
 
   while (isEditing) {
-    // Ждём либо текст/голос, либо клик по кнопкам черновика
     const inputCtx = await conversation.waitFor(["message:text", "message:voice", "callback_query:data"]);
 
-    // ОБРАБОТКА КНОПОК ЧЕРНОВИКА
     if (inputCtx.has("callback_query:data")) {
       const data = inputCtx.callbackQuery.data;
       try { await inputCtx.answerCallbackQuery(); } catch(e){}
@@ -87,9 +89,43 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
       }
       
       if (data === "draft_save") {
-        if (currentDraftMsgId) await ctx.api.editMessageReplyMarkup(ctx.chat!.id, currentDraftMsgId, { reply_markup: undefined }).catch(()=>{});
-        isEditing = false;
-        break;
+        const saveMsg = await ctx.reply("⏳ Сохраняю итоги...");
+        
+        const saveResult = await conversation.external(async () => {
+          try {
+            await prisma.$transaction(async (tx) => {
+              const checkIn = await tx.checkIn.create({ data: { userId: user.id, type: "EVENING" } });
+              if (summaryText) {
+                await tx.answer.create({ data: { userId: user.id, checkInId: checkIn.id, value: summaryText } });
+              }
+              for (const t of draftTasks) {
+                if (t.action === "DONE" && t.originalId) {
+                  await tx.task.update({ where: { id: t.originalId }, data: { status: "DONE" } });
+                } else if (t.action === "CREATE_DONE") {
+                  await tx.task.create({ data: { title: t.title, projectId: t.projectId, assigneeId: user.id, createdById: user.id, status: "DONE" } });
+                } else if (t.action === "CREATE_OPEN") {
+                  await tx.task.create({ data: { title: t.title, projectId: t.projectId, assigneeId: user.id, createdById: user.id, status: "TODO" } });
+                }
+              }
+            });
+            return { ok: true };
+          } catch (e) {
+            console.error("DB Save Error:", e);
+            return { ok: false };
+          }
+        });
+
+        await ctx.api.deleteMessage(ctx.chat!.id, saveMsg.message_id).catch(()=>{});
+
+        if (!saveResult.ok) {
+          await ctx.reply("⚠️ Не получилось сохранить, черновик на месте. Нажми «Сохранить» ещё раз.");
+          currentDraftMsgId = await renderDraft(currentDraftMsgId);
+          continue;
+        } else {
+          if (currentDraftMsgId) await ctx.api.editMessageReplyMarkup(ctx.chat!.id, currentDraftMsgId, { reply_markup: undefined }).catch(()=>{});
+          isEditing = false;
+          break;
+        }
       }
 
       if (data === "draft_add") {
@@ -119,7 +155,6 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
       }
     }
 
-    // ОБРАБОТКА ВВОДА (ГОЛОС / ТЕКСТ)
     if (inputCtx.message) {
       if (currentDraftMsgId) {
         await ctx.api.deleteMessage(ctx.chat!.id, currentDraftMsgId).catch(()=>{});
@@ -135,12 +170,24 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
       let transcript = "";
 
       if (inputCtx.message.voice) {
-        const file = await inputCtx.getFile();
-        const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
         try {
-          const audioResp = await conversation.external(() => fetch(fileUrl));
-          const audioBase64 = Buffer.from(await conversation.external(() => audioResp.arrayBuffer())).toString("base64");
-          transcript = await conversation.external(() => transcribeAudio(audioBase64));
+          transcript = await conversation.external(async () => {
+            const file = await inputCtx.getFile();
+            const fileUrl = `https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`;
+            const audioResp = await fetch(fileUrl);
+            if (!audioResp.ok) throw new Error("download failed");
+            const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
+            const audioBase64 = audioBuffer.toString("base64");
+            
+            const { GoogleGenerativeAI } = require("@google/generative-ai");
+            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+            const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+            const result = await model.generateContent([
+              "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
+              { inlineData: { data: audioBase64, mimeType: "audio/ogg" } }
+            ]);
+            return result.response.text().trim();
+          });
           await ctx.reply(`🎤 Понял: «${transcript}»`);
         } catch (e) {
           await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(()=>{});
@@ -153,13 +200,20 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
 
       if (!transcript.trim()) continue;
 
-      // Анализ через ИИ
       try {
         const analysis = await conversation.external(() => analyzeEveningReport(transcript, openTasks, projects));
         
-        // Добавляем в черновик
         if (summaryText) summaryText += " " + analysis.summary;
         else summaryText = analysis.summary;
+
+        const validIds = new Set(projects.map(p => p.id));
+        const unclearQueue: { title: string, action: "CREATE_DONE" | "CREATE_OPEN" }[] = [];
+
+        const processProject = (pId: any) => {
+          if (!pId || pId === "" || pId === "null") return null;
+          if (validIds.has(pId)) return pId;
+          return "INVALID";
+        };
 
         analysis.markDoneIds?.forEach((id: string) => {
           const t = openTasks.find(o => o.id === id);
@@ -176,30 +230,62 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
         });
 
         analysis.createNewDone?.forEach((t: any) => {
-          draftTasks.push({ refId: refCounter++, action: "CREATE_DONE", title: t.title, projectId: t.projectId });
+          const pid = processProject(t.projectId);
+          if (pid === "INVALID") unclearQueue.push({ title: t.title, action: "CREATE_DONE" });
+          else draftTasks.push({ refId: refCounter++, action: "CREATE_DONE", title: t.title, projectId: pid });
         });
 
         analysis.createNewOpen?.forEach((t: any) => {
-          draftTasks.push({ refId: refCounter++, action: "CREATE_OPEN", title: t.title, projectId: t.projectId });
+          const pid = processProject(t.projectId);
+          if (pid === "INVALID") unclearQueue.push({ title: t.title, action: "CREATE_OPEN" });
+          else draftTasks.push({ refId: refCounter++, action: "CREATE_OPEN", title: t.title, projectId: pid });
         });
 
-        // Обработка неясных задач (Уточнения)
-        if (analysis.unclearTasks && analysis.unclearTasks.length > 0) {
-          for (const unclear of analysis.unclearTasks) {
-            const pkKb = new InlineKeyboard();
-            projects.forEach(p => pkKb.text(p.name, `uc_proj_${p.id}`).row());
-            pkKb.text("🙋 Без проекта", "uc_proj_null").row().text("🗑 Не добавлять", "uc_skip");
+        analysis.unclearTasks?.forEach((u: any) => {
+          unclearQueue.push({ title: u.title, action: "CREATE_DONE" });
+        });
 
-            const ucMsg = await ctx.reply(`Не понял, к какому проекту отнести задачу: «${unclear.title}». Выбери:`, { reply_markup: pkKb });
-            const ucResp = await conversation.waitForCallbackQuery(/uc_proj_.+|uc_skip/);
-            try { await ucResp.answerCallbackQuery(); } catch(e){}
-            await ctx.api.deleteMessage(ctx.chat!.id, ucMsg.message_id).catch(()=>{});
+        if (unclearQueue.length > 0) {
+          let cancelled = false;
+          for (const unclear of unclearQueue) {
+            let resolved = false;
+            while (!resolved) {
+              const pkKb = new InlineKeyboard();
+              projects.forEach(p => pkKb.text(p.name, `uc_proj_${p.id}`).row());
+              pkKb.text("🙋 Без проекта", "uc_proj_null").row();
+              pkKb.text("🗑 Не добавлять", "uc_skip").row();
+              pkKb.text("❌ Отменить отчёт", "cancel_flow");
 
-            if (ucResp.callbackQuery.data !== "uc_skip") {
-              const pId = ucResp.callbackQuery.data.replace("uc_proj_", "");
-              draftTasks.push({ refId: refCounter++, action: "CREATE_DONE", title: unclear.title, projectId: pId === "null" ? null : pId });
+              const ucMsg = await ctx.reply(`Не понял, к какому проекту отнести задачу: «${unclear.title}». Выбери:`, { reply_markup: pkKb });
+              const ucResp = await conversation.waitFor(["callback_query:data", "message:text"]);
+
+              if (ucResp.message?.text) {
+                await ctx.api.deleteMessage(ctx.chat!.id, ucMsg.message_id).catch(()=>{});
+                await ctx.reply("Выбери проект кнопкой или нажми ❌ Отменить отчёт.");
+                continue;
+              }
+
+              if (ucResp.has("callback_query:data")) {
+                const data = ucResp.callbackQuery.data;
+                await ctx.api.deleteMessage(ctx.chat!.id, ucMsg.message_id).catch(()=>{});
+                try { await ucResp.answerCallbackQuery(); } catch(e){}
+
+                if (data === "cancel_flow") {
+                  await ctx.reply("❌ Отменено.");
+                  cancelled = true;
+                  break; 
+                }
+
+                if (data !== "uc_skip") {
+                  const pId = data.replace("uc_proj_", "");
+                  draftTasks.push({ refId: refCounter++, action: unclear.action, title: unclear.title, projectId: pId === "null" ? null : pId });
+                }
+                resolved = true;
+              }
             }
+            if (cancelled) break; 
           }
+          if (cancelled) return; 
         }
 
       } catch (e) {
@@ -212,42 +298,14 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
     }
   }
 
-  // === 3. СОХРАНЕНИЕ В БД ===
-  const savingMsg = await ctx.reply("⏳ Сохраняю итоги...");
-
-  const checkIn = await conversation.external(() => 
-    prisma.checkIn.create({ data: { userId: user.id, type: "EVENING" } })
-  );
-
-  if (summaryText) {
-    await conversation.external(() => 
-      prisma.answer.create({ data: { userId: user.id, checkInId: checkIn.id, value: summaryText } })
-    );
-  }
-
-  await conversation.external(async () => {
-    for (const t of draftTasks) {
-      if (t.action === "DONE" && t.originalId) {
-        await prisma.task.update({ where: { id: t.originalId }, data: { status: "DONE" } });
-      } else if (t.action === "CREATE_DONE") {
-        await prisma.task.create({ data: { title: t.title, projectId: t.projectId, assigneeId: user.id, createdById: user.id, status: "DONE" } });
-      } else if (t.action === "CREATE_OPEN") {
-        await prisma.task.create({ data: { title: t.title, projectId: t.projectId, assigneeId: user.id, createdById: user.id, status: "TODO" } });
-      }
-      // POSTPONE ничего не делает с БД, задача просто остаётся открытой
-    }
-  });
-
-  await ctx.api.deleteMessage(ctx.chat!.id, savingMsg.message_id).catch(()=>{});
   await ctx.reply("✨ Итоги дня успешно сохранены! Отдыхай.");
 
-  // --- ПОДСЧЕТ СЕРИИ БЕЗ ПРОПУСКОВ ---
   try {
     const now = new Date();
     const todayStr = formatInTimeZone(now, user.timezone, "yyyy-MM-dd");
     const startOfToday = fromZonedTime(`${todayStr} 00:00:00`, user.timezone);
 
-    const todayEveningCount = await conversation.external(() => 
+    const todayEveningCount = await conversation.external(() =>
       prisma.checkIn.count({ where: { userId: user.id, type: "EVENING", createdAt: { gte: startOfToday } } })
     );
 
@@ -269,7 +327,7 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
         const startOfPrev = fromZonedTime(`${prevDateString} 00:00:00`, user.timezone);
         const endOfPrev = fromZonedTime(`${prevDateString} 23:59:59`, user.timezone);
 
-        const hasPrevCheckIn = await conversation.external(() => 
+        const hasPrevCheckIn = await conversation.external(() =>
           prisma.checkIn.findFirst({ where: { userId: user.id, type: "EVENING", createdAt: { gte: startOfPrev, lte: endOfPrev } } })
         );
 
