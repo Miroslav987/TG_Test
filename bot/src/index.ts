@@ -15,7 +15,7 @@ import { newQuestionConversation } from "./conversations/newQuestion";
 import { viewReportsConversation } from "./conversations/viewReports";
 import { eveningConversation } from "./conversations/evening";
 import { morningConversation } from "./conversations/morning";
-import { prisma, sendTelegramMessage, transcribeAudio } from "@standup/shared";
+import { prisma, sendTelegramMessage } from "@standup/shared";
 import { absenceConversation } from "./conversations/absence";
 import { assignTaskConversation } from "./conversations/assignTask";
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -37,12 +37,8 @@ export type MyContext = Context & {
 
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
 
-// === ГЛОБАЛЬНЫЙ ФИЛЬТР: БОТ РАБОТАЕТ ТОЛЬКО В ЛИЧКЕ ===
 bot.use(async (ctx, next) => {
-  if (ctx.chat && ctx.chat.type !== "private") {
-    // Если сообщение пришло из группы или канала — просто молча игнорируем его
-    return;
-  }
+  if (ctx.chat && ctx.chat.type !== "private") return;
   await next();
 });
 
@@ -253,19 +249,6 @@ bot.callbackQuery(/^reqdel_project_(.+)$/, async (ctx) => {
   await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() });
 });
 
-bot.callbackQuery(/^abs_(resched|edit|del)_(.+)$/, async (ctx) => {
-  const action = ctx.match[1];
-  const absenceId = ctx.match[2];
-  try { await ctx.answerCallbackQuery(); } catch(e){}
-  const absence = await prisma.absence.findUnique({ where: { id: absenceId } });
-  if (!absence || absence.status !== "ACTIVE") {
-    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
-    await ctx.reply("Это меню уже неактуально.");
-    return;
-  }
-  await ctx.conversation.enter("manageAbsence", { action, absenceId });
-});
-
 async function cancelAbsence(absenceId: string, ctx: MyContext) {
   const absence = await prisma.absence.update({ where: { id: absenceId }, data: { status: "CANCELLED" }, include: { user: true } });
   await recalculateUserPause(absence.userId);
@@ -285,6 +268,19 @@ bot.callbackQuery(/^absence_yes_(.+)$/, async (ctx) => {
 });
 
 bot.callbackQuery(/^absence_no_(.+)$/, async (ctx) => { await cancelAbsence(ctx.match[1], ctx); });
+
+bot.callbackQuery(/^abs_(resched|edit|del)_(.+)$/, async (ctx) => {
+  const action = ctx.match[1];
+  const absenceId = ctx.match[2];
+  try { await ctx.answerCallbackQuery(); } catch(e){}
+  const absence = await prisma.absence.findUnique({ where: { id: absenceId } });
+  if (!absence || absence.status !== "ACTIVE") {
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    await ctx.reply("Это меню уже неактуально.");
+    return;
+  }
+  await ctx.conversation.enter("manageAbsence", { action, absenceId });
+});
 
 bot.callbackQuery("intent_yes_NEW_TASK_PREFILLED", async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
@@ -315,6 +311,7 @@ bot.callbackQuery(/^intent_yes_(.+)$/, async (ctx) => {
     case "MY_PROJECTS": await myProjectsHandler(ctx); break;
     case "NEW_ABSENCE": await ctx.conversation.enter("absence"); break;
     case "VIEW_REPORTS": await ctx.conversation.enter("viewReports"); break;
+    case "EVENING_REPORT": await ctx.conversation.enter("evening", ctx.session.intentText); break;
     case "MODIFY_ABSENCE":
     case "CANCEL_ABSENCE":
       const action = intent === "CANCEL_ABSENCE" ? "del" : "smart";
@@ -341,9 +338,11 @@ bot.callbackQuery(/^intent_yes_(.+)$/, async (ctx) => {
 bot.callbackQuery("intent_no", async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (e) {}
   await ctx.deleteMessage().catch(() => {});
+  
   ctx.session.prefillTitle = undefined;
   ctx.session.prefillProjectId = undefined;
   ctx.session.prefillProjectTitle = undefined;
+
   await ctx.reply("Хорошо, воспользуйся кнопками внизу или напиши /menu.");
 });
 
@@ -356,11 +355,12 @@ async function handleIncomingText(ctx: MyContext, userText: string) {
 
     const prompt = `Проанализируй сообщение пользователя и верни СТРОГО JSON без markdown-обёртки и пояснений:
 {
-  "intent": "NEW_TASK" | "NEW_PROJECT" | "MY_TASKS" | "MY_PROJECTS" | "NEW_ABSENCE" | "MODIFY_ABSENCE" | "CANCEL_ABSENCE" | "VIEW_REPORTS" | "HELP",
+  "intent": "NEW_TASK" | "NEW_PROJECT" | "MY_TASKS" | "MY_PROJECTS" | "NEW_ABSENCE" | "MODIFY_ABSENCE" | "CANCEL_ABSENCE" | "VIEW_REPORTS" | "EVENING_REPORT" | "HELP",
   "taskTitle": "строка или null (только если intent NEW_TASK — сама суть задачи, без упоминания проекта)",
   "projectName": "строка или null (только если intent NEW_TASK и в сообщении явно назван проект)",
   "projectTitle": "строка или null (только если intent NEW_PROJECT — название проекта, если явно названо)"
 }
+Правило для EVENING_REPORT: выбирай его, если пользователь подводит итоги дня: что сделал, что перенёс, какие новые задачи появились, или отчитывается за день.
 Сообщение: «${userText}»`;
 
     const result = await model.generateContent(prompt);
@@ -380,8 +380,10 @@ async function handleIncomingText(ctx: MyContext, userText: string) {
           if (matches.length === 1) matchedProject = matches[0];
         }
       }
+
       ctx.session.prefillTitle = parsedData.taskTitle;
       const kb = new InlineKeyboard().text("✅ Да, создать", "intent_yes_NEW_TASK_PREFILLED").text("✏️ Не так", "intent_no");
+
       if (matchedProject) {
         ctx.session.prefillProjectId = matchedProject.id;
         await ctx.reply(`Правильно понял: создать задачу «${parsedData.taskTitle}» в проекте «${matchedProject.name}»?`, { reply_markup: kb });
@@ -403,7 +405,7 @@ async function handleIncomingText(ctx: MyContext, userText: string) {
       "NEW_TASK": "создать задачу", "NEW_PROJECT": "создать проект", "MY_TASKS": "посмотреть свои задачи",
       "MY_PROJECTS": "посмотреть свои проекты", "NEW_ABSENCE": "сообщить о новом отсутствии",
       "MODIFY_ABSENCE": "изменить даты/время отсутствия", "CANCEL_ABSENCE": "отменить отсутствие",
-      "VIEW_REPORTS": "посмотреть отчёт по сотруднику"
+      "VIEW_REPORTS": "посмотреть отчёт по сотруднику", "EVENING_REPORT": "подвести итоги дня"
     };
 
     if (intentMap[intent]) {
@@ -432,12 +434,20 @@ bot.on("message:voice", async (ctx) => {
     const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
     const audioBase64 = audioBuffer.toString("base64");
 
-    // ИСПОЛЬЗУЕМ ВЫНЕСЕННУЮ ФУНКЦИЮ
-    const transcript = await transcribeAudio(audioBase64);
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+
+    const result = await model.generateContent([
+      "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
+      { inlineData: { data: audioBase64, mimeType: "audio/ogg" } }
+    ]);
+    const transcript = result.response.text().trim();
 
     await ctx.api.deleteMessage(ctx.chat!.id, msgInfo.message_id).catch(() => {});
 
-    if (!transcript) throw new Error("Empty transcript");
+    if (!transcript) {
+      throw new Error("Empty transcript");
+    }
 
     await ctx.reply(`🎤 Понял: «${transcript}»`);
     await handleIncomingText(ctx, transcript);

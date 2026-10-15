@@ -13,7 +13,12 @@ type DraftTask = {
   projectId?: string | null;
 };
 
-export async function eveningConversation(conversation: Conversation<MyContext>, ctx: MyContext) {
+// ДОБАВЛЕН ПАРАМЕТР initialText
+export async function eveningConversation(
+  conversation: Conversation<MyContext>, 
+  ctx: MyContext, 
+  initialText?: string
+) {
   const user = await conversation.external(() => 
     prisma.user.findUnique({ where: { telegramId: ctx.from?.id }, include: { roles: true } })
   );
@@ -33,7 +38,7 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
   let draftTasks: DraftTask[] = [];
   let summaryText = "";
   let refCounter = 1;
-  let projectSelectionForRef: number | null = null; // Для переключения клавиатуры на выбор проекта
+  let projectSelectionForRef: number | null = null;
 
   const renderDraft = async (msgToEdit?: number) => {
     let text = "📋 Предварительный итог дня\n";
@@ -70,12 +75,10 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
     const kb = new InlineKeyboard();
 
     if (projectSelectionForRef !== null) {
-      // Режим выбора проекта для конкретной задачи
       projects.forEach(p => kb.text(p.name, `dsp_${projectSelectionForRef}_${p.id}`).row());
       kb.text("🙋 Без проекта", `dsp_${projectSelectionForRef}_null`).row();
       kb.text("↩️ Назад", "draft_back").row();
     } else {
-      // Стандартный режим черновика
       draftTasks.forEach(t => {
         const toggleAction = (t.action === "DONE" || t.action === "CREATE_DONE") ? "postpone" : "done";
         const toggleIcon = toggleAction === "postpone" ? "➡️ Перенести" : "✅ Выполнить";
@@ -106,15 +109,121 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
     }
   };
 
-  await ctx.reply("🌆 Рабочий день подошёл к концу. Расскажи голосовым сообщением или текстом, что успел сделать, что переносится на потом и какие новые задачи появились.\n(или нажми /menu для отмены)");
+  // === ВЫНЕСЕННАЯ ФУНКЦИЯ ОБРАБОТКИ ТЕКСТА ИИ ===
+  const processText = async (transcript: string) => {
+    const waitMsg = await ctx.reply("⏳ Анализирую итоги дня...");
+    try {
+      const analysis = await conversation.external(() => analyzeEveningReport(transcript, openTasks, projects));
+      
+      if (summaryText) summaryText += " " + analysis.summary;
+      else summaryText = analysis.summary;
+
+      const validIds = new Set(projects.map(p => p.id));
+      const unclearQueue: { title: string, action: "CREATE_DONE" | "CREATE_OPEN" }[] = [];
+
+      const processProject = (pId: any) => {
+        if (!pId || pId === "" || pId === "null") return null;
+        if (validIds.has(pId)) return pId;
+        return "INVALID";
+      };
+
+      analysis.markDoneIds?.forEach((id: string) => {
+        const t = openTasks.find(o => o.id === id);
+        if (t && !draftTasks.some(d => d.originalId === id)) {
+          draftTasks.push({ refId: refCounter++, originalId: t.id, action: "DONE", title: t.title, projectId: t.projectId });
+        }
+      });
+
+      analysis.postponeIds?.forEach((id: string) => {
+        const t = openTasks.find(o => o.id === id);
+        if (t && !draftTasks.some(d => d.originalId === id)) {
+          draftTasks.push({ refId: refCounter++, originalId: t.id, action: "POSTPONE", title: t.title, projectId: t.projectId });
+        }
+      });
+
+      analysis.createNewDone?.forEach((t: any) => {
+        const pid = processProject(t.projectId);
+        if (pid === "INVALID") unclearQueue.push({ title: t.title, action: "CREATE_DONE" });
+        else draftTasks.push({ refId: refCounter++, action: "CREATE_DONE", title: t.title, projectId: pid });
+      });
+
+      analysis.createNewOpen?.forEach((t: any) => {
+        const pid = processProject(t.projectId);
+        if (pid === "INVALID") unclearQueue.push({ title: t.title, action: "CREATE_OPEN" });
+        else draftTasks.push({ refId: refCounter++, action: "CREATE_OPEN", title: t.title, projectId: pid });
+      });
+
+      analysis.unclearTasks?.forEach((u: any) => {
+        unclearQueue.push({ title: u.title, action: "CREATE_DONE" });
+      });
+
+      if (unclearQueue.length > 0) {
+        let cancelled = false;
+        for (const unclear of unclearQueue) {
+          let resolved = false;
+          while (!resolved) {
+            const pkKb = new InlineKeyboard();
+            projects.forEach(p => pkKb.text(p.name, `uc_proj_${p.id}`).row());
+            pkKb.text("🙋 Без проекта", "uc_proj_null").row();
+            pkKb.text("🗑 Не добавлять", "uc_skip").row();
+            pkKb.text("❌ Отменить отчёт", "cancel_flow");
+
+            const ucMsg = await ctx.reply(`Не понял, к какому проекту отнести задачу: «${unclear.title}». Выбери:`, { reply_markup: pkKb });
+            const ucResp = await conversation.waitFor(["callback_query:data", "message:text"]);
+
+            if (ucResp.message?.text) {
+              await ctx.api.deleteMessage(ctx.chat!.id, ucMsg.message_id).catch(()=>{});
+              await ctx.reply("Выбери проект кнопкой или нажми ❌ Отменить отчёт.");
+              continue;
+            }
+
+            if (ucResp.has("callback_query:data")) {
+              const data = ucResp.callbackQuery.data;
+              await ctx.api.deleteMessage(ctx.chat!.id, ucMsg.message_id).catch(()=>{});
+              try { await ucResp.answerCallbackQuery(); } catch(e){}
+
+              if (data === "cancel_flow") {
+                await ctx.reply("❌ Отменено.");
+                cancelled = true;
+                break; 
+              }
+
+              if (data !== "uc_skip") {
+                const pId = data.replace("uc_proj_", "");
+                draftTasks.push({ refId: refCounter++, action: unclear.action, title: unclear.title, projectId: pId === "null" ? null : pId });
+              }
+              resolved = true;
+            }
+          }
+          if (cancelled) return false; // Прерываем весь processText
+        }
+      }
+
+    } catch (e) {
+      console.error("AI Error:", e);
+      await ctx.reply("Произошла ошибка при анализе ИИ. Попробуй описать проще.");
+    }
+
+    await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(()=>{});
+    return true; // Успешно обработано
+  };
+
+  let currentDraftMsgId: number | undefined = undefined;
+
+  // Если передан готовый текст от ИИ
+  if (initialText) {
+    const ok = await processText(initialText);
+    if (!ok) return;
+    currentDraftMsgId = await renderDraft();
+  } else {
+    await ctx.reply("🌆 Рабочий день подошёл к концу. Расскажи голосовым сообщением или текстом, что успел сделать, что переносится на потом и какие новые задачи появились.\n(или нажми /menu для отмены)");
+  }
 
   let isEditing = true;
-  let currentDraftMsgId: number | undefined = undefined;
 
   while (isEditing) {
     const inputCtx = await conversation.waitFor(["message:text", "message:voice", "callback_query:data"]);
 
-    // === ОБРАБОТКА КНОПОК ЧЕРНОВИКА ===
     if (inputCtx.has("callback_query:data")) {
       const data = inputCtx.callbackQuery.data;
       try { await inputCtx.answerCallbackQuery(); } catch(e){}
@@ -171,7 +280,6 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
         continue;
       }
 
-      // Новые обработчики для проекта
       if (data.startsWith("draft_proj_")) {
         projectSelectionForRef = parseInt(data.replace("draft_proj_", ""));
         currentDraftMsgId = await renderDraft(currentDraftMsgId);
@@ -221,7 +329,6 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
       }
     }
 
-    // === ОБРАБОТКА ВВОДА (ГОЛОС / ТЕКСТ) ===
     if (inputCtx.message) {
       if (currentDraftMsgId) {
         await ctx.api.deleteMessage(ctx.chat!.id, currentDraftMsgId).catch(()=>{});
@@ -233,10 +340,10 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
         return;
       }
 
-      const waitMsg = await ctx.reply("⏳ Расшифровываю и анализирую...");
       let transcript = "";
 
       if (inputCtx.message.voice) {
+        const waitAudioMsg = await ctx.reply("⏳ Расшифровываю аудио...");
         try {
           transcript = await conversation.external(async () => {
             const file = await inputCtx.getFile();
@@ -249,124 +356,31 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
           });
           await ctx.reply(`🎤 Понял: «${transcript}»`);
         } catch (e) {
-          await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(()=>{});
+          await ctx.api.deleteMessage(ctx.chat!.id, waitAudioMsg.message_id).catch(()=>{});
           await ctx.reply("Не смог расшифровать аудио. Попробуй ещё раз или напиши текстом.");
           continue;
         }
+        await ctx.api.deleteMessage(ctx.chat!.id, waitAudioMsg.message_id).catch(()=>{});
       } else {
         transcript = inputCtx.message.text || "";
       }
 
       if (!transcript.trim()) continue;
 
-      // Анализ через ИИ
-      try {
-        const analysis = await conversation.external(() => analyzeEveningReport(transcript, openTasks, projects));
-        
-        if (summaryText) summaryText += " " + analysis.summary;
-        else summaryText = analysis.summary;
-
-        const validIds = new Set(projects.map(p => p.id));
-        const unclearQueue: { title: string, action: "CREATE_DONE" | "CREATE_OPEN" }[] = [];
-
-        const processProject = (pId: any) => {
-          if (!pId || pId === "" || pId === "null") return null;
-          if (validIds.has(pId)) return pId;
-          return "INVALID";
-        };
-
-        analysis.markDoneIds?.forEach((id: string) => {
-          const t = openTasks.find(o => o.id === id);
-          if (t && !draftTasks.some(d => d.originalId === id)) {
-            draftTasks.push({ refId: refCounter++, originalId: t.id, action: "DONE", title: t.title, projectId: t.projectId });
-          }
-        });
-
-        analysis.postponeIds?.forEach((id: string) => {
-          const t = openTasks.find(o => o.id === id);
-          if (t && !draftTasks.some(d => d.originalId === id)) {
-            draftTasks.push({ refId: refCounter++, originalId: t.id, action: "POSTPONE", title: t.title, projectId: t.projectId });
-          }
-        });
-
-        analysis.createNewDone?.forEach((t: any) => {
-          const pid = processProject(t.projectId);
-          if (pid === "INVALID") unclearQueue.push({ title: t.title, action: "CREATE_DONE" });
-          else draftTasks.push({ refId: refCounter++, action: "CREATE_DONE", title: t.title, projectId: pid });
-        });
-
-        analysis.createNewOpen?.forEach((t: any) => {
-          const pid = processProject(t.projectId);
-          if (pid === "INVALID") unclearQueue.push({ title: t.title, action: "CREATE_OPEN" });
-          else draftTasks.push({ refId: refCounter++, action: "CREATE_OPEN", title: t.title, projectId: pid });
-        });
-
-        analysis.unclearTasks?.forEach((u: any) => {
-          unclearQueue.push({ title: u.title, action: "CREATE_DONE" });
-        });
-
-        if (unclearQueue.length > 0) {
-          let cancelled = false;
-          for (const unclear of unclearQueue) {
-            let resolved = false;
-            while (!resolved) {
-              const pkKb = new InlineKeyboard();
-              projects.forEach(p => pkKb.text(p.name, `uc_proj_${p.id}`).row());
-              pkKb.text("🙋 Без проекта", "uc_proj_null").row();
-              pkKb.text("🗑 Не добавлять", "uc_skip").row();
-              pkKb.text("❌ Отменить отчёт", "cancel_flow");
-
-              const ucMsg = await ctx.reply(`Не понял, к какому проекту отнести задачу: «${unclear.title}». Выбери:`, { reply_markup: pkKb });
-              const ucResp = await conversation.waitFor(["callback_query:data", "message:text"]);
-
-              if (ucResp.message?.text) {
-                await ctx.api.deleteMessage(ctx.chat!.id, ucMsg.message_id).catch(()=>{});
-                await ctx.reply("Выбери проект кнопкой или нажми ❌ Отменить отчёт.");
-                continue;
-              }
-
-              if (ucResp.has("callback_query:data")) {
-                const data = ucResp.callbackQuery.data;
-                await ctx.api.deleteMessage(ctx.chat!.id, ucMsg.message_id).catch(()=>{});
-                try { await ucResp.answerCallbackQuery(); } catch(e){}
-
-                if (data === "cancel_flow") {
-                  await ctx.reply("❌ Отменено.");
-                  cancelled = true;
-                  break; 
-                }
-
-                if (data !== "uc_skip") {
-                  const pId = data.replace("uc_proj_", "");
-                  draftTasks.push({ refId: refCounter++, action: unclear.action, title: unclear.title, projectId: pId === "null" ? null : pId });
-                }
-                resolved = true;
-              }
-            }
-            if (cancelled) break; 
-          }
-          if (cancelled) return; 
-        }
-
-      } catch (e) {
-        console.error("AI Error:", e);
-        await ctx.reply("Произошла ошибка при анализе ИИ. Попробуй описать проще.");
-      }
-
-      await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(()=>{});
-      currentDraftMsgId = await renderDraft();
+      const ok = await processText(transcript);
+      if (!ok) return;
+      currentDraftMsgId = await renderDraft(currentDraftMsgId);
     }
   }
 
   await ctx.reply("✨ Итоги дня успешно сохранены! Отдыхай.");
 
-  // --- ПОДСЧЕТ СЕРИИ БЕЗ ПРОПУСКОВ ---
   try {
     const now = new Date();
     const todayStr = formatInTimeZone(now, user.timezone, "yyyy-MM-dd");
     const startOfToday = fromZonedTime(`${todayStr} 00:00:00`, user.timezone);
 
-    const todayEveningCount = await conversation.external(() =>
+    const todayEveningCount = await conversation.external(() => 
       prisma.checkIn.count({ where: { userId: user.id, type: "EVENING", createdAt: { gte: startOfToday } } })
     );
 
@@ -388,7 +402,7 @@ export async function eveningConversation(conversation: Conversation<MyContext>,
         const startOfPrev = fromZonedTime(`${prevDateString} 00:00:00`, user.timezone);
         const endOfPrev = fromZonedTime(`${prevDateString} 23:59:59`, user.timezone);
 
-        const hasPrevCheckIn = await conversation.external(() =>
+        const hasPrevCheckIn = await conversation.external(() => 
           prisma.checkIn.findFirst({ where: { userId: user.id, type: "EVENING", createdAt: { gte: startOfPrev, lte: endOfPrev } } })
         );
 
