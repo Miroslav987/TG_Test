@@ -3,7 +3,7 @@ import { InlineKeyboard } from "grammy";
 import { MyContext, prisma, MENU_TRIGGERS } from "../index";
 import { subDays } from "date-fns";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz"; 
-import { analyzeEveningReport } from "@standup/shared";
+import { analyzeEveningReport, transcribeAudio } from "@standup/shared";
 
 type DraftTask = {
   refId: number;
@@ -13,7 +13,6 @@ type DraftTask = {
   projectId?: string | null;
 };
 
-// ДОБАВЛЕН ПАРАМЕТР initialText
 export async function eveningConversation(
   conversation: Conversation<MyContext>, 
   ctx: MyContext, 
@@ -23,6 +22,36 @@ export async function eveningConversation(
     prisma.user.findUnique({ where: { telegramId: ctx.from?.id }, include: { roles: true } })
   );
   if (!user) return;
+
+  const { beforeEnd, todayReport } = await conversation.external(async () => {
+    const now = new Date();
+    const todayStr = formatInTimeZone(now, user.timezone, "yyyy-MM-dd");
+    const startOfToday = fromZonedTime(`${todayStr} 00:00:00`, user.timezone);
+    const currentTimeStr = formatInTimeZone(now, user.timezone, "HH:mm");
+    
+    const isBeforeEnd = currentTimeStr < user.workEnd;
+    
+    const existingCheckIn = await prisma.checkIn.findFirst({
+      where: { userId: user.id, type: "EVENING", createdAt: { gte: startOfToday } },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    const hasTodayReport = existingCheckIn ? formatInTimeZone(existingCheckIn.createdAt, user.timezone, "HH:mm") : null;
+    
+    return { beforeEnd: isBeforeEnd, todayReport: hasTodayReport };
+  });
+
+  if (todayReport) {
+    await ctx.reply(`ℹ️ Сегодня ты уже сдавал(а) итоги в ${todayReport}. Это будет дополнение, серия не изменится.`);
+  }
+
+  if (!initialText) {
+    if (beforeEnd) {
+      await ctx.reply("📝 Можно подвести итоги заранее. Расскажи голосовым или текстом, что уже сделано, что переносится и какие новые задачи появились.\n(или напиши /menu для отмены)");
+    } else {
+      await ctx.reply("🌆 Рабочий день подошёл к концу. Расскажи голосовым сообщением или текстом, что успел сделать, что переносится на потом и какие новые задачи появились.\n(или напиши /menu для отмены)");
+    }
+  }
 
   const openTasks = await conversation.external(() => 
     prisma.task.findMany({ 
@@ -56,18 +85,10 @@ export async function eveningConversation(
         return `   ${t.refId}. ${t.title} — ${pName}`;
       };
 
-      if (doneTasks.length > 0) {
-        text += "\n✅ Закрою существующие задачи:\n" + doneTasks.map(formatTask).join("\n");
-      }
-      if (createDoneTasks.length > 0) {
-        text += "\n\n🆕 Создам новые (сразу выполненные):\n" + createDoneTasks.map(formatTask).join("\n");
-      }
-      if (createOpenTasks.length > 0) {
-        text += "\n\n🆕 Создам новые (на будущее):\n" + createOpenTasks.map(formatTask).join("\n");
-      }
-      if (postponeTasks.length > 0) {
-        text += "\n\n➡️ Остаются открытыми:\n" + postponeTasks.map(formatTask).join("\n");
-      }
+      if (doneTasks.length > 0) text += "\n✅ Закрою существующие задачи:\n" + doneTasks.map(formatTask).join("\n");
+      if (createDoneTasks.length > 0) text += "\n\n🆕 Создам новые (сразу выполненные):\n" + createDoneTasks.map(formatTask).join("\n");
+      if (createOpenTasks.length > 0) text += "\n\n🆕 Создам новые (на будущее):\n" + createOpenTasks.map(formatTask).join("\n");
+      if (postponeTasks.length > 0) text += "\n\n➡️ Остаются открытыми:\n" + postponeTasks.map(formatTask).join("\n");
     }
 
     if (summaryText) text += `\n\n📝 Итог: ${summaryText}`;
@@ -109,7 +130,6 @@ export async function eveningConversation(
     }
   };
 
-  // === ВЫНЕСЕННАЯ ФУНКЦИЯ ОБРАБОТКИ ТЕКСТА ИИ ===
   const processText = async (transcript: string) => {
     const waitMsg = await ctx.reply("⏳ Анализирую итоги дня...");
     try {
@@ -195,7 +215,7 @@ export async function eveningConversation(
               resolved = true;
             }
           }
-          if (cancelled) return false; // Прерываем весь processText
+          if (cancelled) return false;
         }
       }
 
@@ -205,18 +225,15 @@ export async function eveningConversation(
     }
 
     await ctx.api.deleteMessage(ctx.chat!.id, waitMsg.message_id).catch(()=>{});
-    return true; // Успешно обработано
+    return true; 
   };
 
   let currentDraftMsgId: number | undefined = undefined;
 
-  // Если передан готовый текст от ИИ
   if (initialText) {
     const ok = await processText(initialText);
     if (!ok) return;
     currentDraftMsgId = await renderDraft();
-  } else {
-    await ctx.reply("🌆 Рабочий день подошёл к концу. Расскажи голосовым сообщением или текстом, что успел сделать, что переносится на потом и какие новые задачи появились.\n(или нажми /menu для отмены)");
   }
 
   let isEditing = true;
@@ -351,7 +368,6 @@ export async function eveningConversation(
             const resp = await fetch(url);
             if (!resp.ok) throw new Error("download failed");
             const b64 = Buffer.from(await resp.arrayBuffer()).toString("base64");
-            const { transcribeAudio } = require("@standup/shared");
             return await transcribeAudio(b64);
           });
           await ctx.reply(`🎤 Понял: «${transcript}»`);
@@ -373,7 +389,11 @@ export async function eveningConversation(
     }
   }
 
-  await ctx.reply("✨ Итоги дня успешно сохранены! Отдыхай.");
+  if (beforeEnd) {
+    await ctx.reply("✨ Итоги сохранены. Вечернее напоминание сегодня не придёт. Появится что-то ещё — нажми «📝 Итоги дня» и дополни.");
+  } else {
+    await ctx.reply("✨ Итоги дня успешно сохранены! Отдыхай.");
+  }
 
   try {
     const now = new Date();
