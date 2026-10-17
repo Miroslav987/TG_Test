@@ -6,7 +6,7 @@ import { MENU_TRIGGERS } from "../index";
 export async function editTaskConversation(
   conversation: Conversation<MyContext>,
   ctx: MyContext,
-  taskId: string          // ← принимаем напрямую, а не из ctx.session
+  taskId: string
 ) {
   if (!taskId) return;
 
@@ -52,13 +52,17 @@ export async function editTaskConversation(
     await ctx.reply("✅ Задача обновлена");
 
   } else if (action === "edit_status") {
+    // ДОБАВЛЕН СТАТУС BLOCKED
     const statusKb = new InlineKeyboard()
       .text("TODO (К выполнению)", "TODO").row()
       .text("IN_PROGRESS (В процессе)", "IN_PROGRESS").row()
+      .text("⛔ BLOCKED (Заблокирована)", "BLOCKED").row()
       .text("DONE (Выполнено)", "DONE");
 
     await ctx.reply("Выбери новый статус:", { reply_markup: statusKb });
-    const statusCtx = await conversation.waitForCallbackQuery(["TODO", "IN_PROGRESS", "DONE"]);
+    
+    // ОБНОВЛЕН СПИСОК ОЖИДАНИЯ
+    const statusCtx = await conversation.waitForCallbackQuery(["TODO", "IN_PROGRESS", "BLOCKED", "DONE"]);
     const newStatus = statusCtx.callbackQuery.data;
     try { await statusCtx.answerCallbackQuery(); } catch (e) {}
 

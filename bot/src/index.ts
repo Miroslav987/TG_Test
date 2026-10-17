@@ -73,7 +73,7 @@ export function getMainMenuKeyboard(isAdmin: boolean) {
     kb.row().text("🆕 Новый вопрос").text("📊 Отчёты");
     kb.row().text("📤 Назначить задачу");
   }
-  return kb.resized();
+  return kb.resized(); // .persistent() убран
 }
 
 bot.command("start", async (ctx) => {
@@ -127,21 +127,84 @@ const myProjectsHandler = async (ctx: MyContext) => {
   const lines = user.projects.map(p => `📂 *${p.name}* — ${p._count.tasks} открытых задач`);
   await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" });
 };
+bot.hears("📁 Мои проекты", myProjectsHandler);
 bot.command("myprojects", myProjectsHandler);
+
+// === ФУНКЦИЯ ДЛЯ РЕНДЕРА СПИСКА ЗАДАЧ ===
+function renderTaskList(tasks: any[], projectName: string, openCount: number, isContinuation: boolean = false) {
+  if (tasks.length === 0) {
+    return { text: "Список пуст", keyboard: new InlineKeyboard() };
+  }
+
+  let text = `📂 ${projectName} — открыто: ${openCount}${isContinuation ? " (продолжение)" : ""}\n`;
+  let allDone = true;
+
+  const kb = new InlineKeyboard();
+
+  tasks.forEach((t, i) => {
+    const isDone = t.status === "DONE";
+    if (!isDone) allDone = false;
+
+    let icon = "⚪";
+    if (t.status === "IN_PROGRESS") icon = "🔵";
+    else if (t.status === "BLOCKED") icon = "⛔";
+    else if (t.status === "DONE") icon = "✅";
+
+    text += `${i + 1}. ${icon} ${t.title}\n`;
+
+    const shortTitle = t.title.length > 22 ? t.title.slice(0, 21) + "…" : t.title;
+    const btnText = isDone ? `↩️ ${i + 1}. ${shortTitle}` : `✅ ${i + 1}. ${shortTitle}`;
+
+    kb.text(btnText, `tt_${t.id}`)
+      .text("✏️", `edit_task_${t.id}`)
+      .text("🗑", `delete_task_${t.id}`)
+      .row();
+  });
+
+  if (allDone) {
+    text += "\n🎉 Всё из этого списка сделано";
+  }
+
+  return { text, keyboard: kb };
+}
 
 const myTasksHandler = async (ctx: MyContext) => {
   const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
   if (!user) return;
-  const tasks = await prisma.task.findMany({ where: { status: { not: "DONE" }, OR: [{ assigneeId: user.id }, { assigneeId: null, createdById: user.id }] }, include: { project: true } });
+  
+  const tasks = await prisma.task.findMany({ 
+    where: { 
+      status: { not: "DONE" }, 
+      OR: [{ assigneeId: user.id }, { assigneeId: null, createdById: user.id }] 
+    }, 
+    include: { project: true } 
+  });
+  
   if (tasks.length === 0) return ctx.reply("У тебя сейчас нет открытых задач 🎉");
-  const grouped = tasks.reduce((acc, task) => { const pName = task.project?.name ?? "Без проекта"; if (!acc[pName]) acc[pName] = []; acc[pName].push(task); return acc; }, {} as Record<string, typeof tasks>);
-  const pNames = Object.keys(grouped).sort((a, b) => { if (a === "Без проекта") return 1; if (b === "Без проекта") return -1; return a.localeCompare(b); });
+  
+  const grouped = tasks.reduce((acc, task) => { 
+    const pName = task.project?.name ?? "Без проекта"; 
+    if (!acc[pName]) acc[pName] = { projectId: task.projectId, tasks: [] }; 
+    acc[pName].tasks.push(task); 
+    return acc; 
+  }, {} as Record<string, { projectId: string | null, tasks: typeof tasks }>);
+  
+  const pNames = Object.keys(grouped).sort((a, b) => { 
+    if (a === "Без проекта") return 1; 
+    if (b === "Без проекта") return -1; 
+    return a.localeCompare(b); 
+  });
+  
   for (const pName of pNames) {
-    const icon = pName === "Без проекта" ? "📋" : "📂";
-    await ctx.reply(`${icon} *${pName}*:`, { parse_mode: "Markdown" });
-    for (const t of grouped[pName]) {
-      const kb = new InlineKeyboard().text("✏️ Редактировать", `edit_task_${t.id}`).text("🗑️ Удалить", `delete_task_${t.id}`);
-      await ctx.reply(`  • ${t.title} [${t.status}]`, { reply_markup: kb });
+    const groupTasks = grouped[pName].tasks;
+    const openCount = groupTasks.length;
+    
+    // Разбиваем на блоки по 8 задач
+    for (let i = 0; i < groupTasks.length; i += 8) {
+      const chunk = groupTasks.slice(i, i + 8);
+      const isContinuation = i > 0;
+      const { text, keyboard } = renderTaskList(chunk, pName, openCount, isContinuation);
+      await ctx.reply(text, { reply_markup: keyboard }); // Без parse_mode
     }
   }
 };
@@ -203,13 +266,122 @@ bot.callbackQuery(/^ack_task_.+/, async (ctx) => {
   } catch (error) { try { await ctx.answerCallbackQuery({ text: "Ошибка", show_alert: true }); } catch (e) {} }
 });
 
+// === НОВЫЙ ОБРАБОТЧИК: ПЕРЕКЛЮЧЕНИЕ СТАТУСА ===
+bot.callbackQuery(/^tt_(.+)$/, async (ctx) => {
+  const taskId = ctx.match[1];
+  
+  const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
+  if (!user) return;
+
+  const task = await prisma.task.findUnique({ where: { id: taskId }, include: { project: true } });
+  
+  if (!task) {
+    try { await ctx.answerCallbackQuery("Задача уже удалена"); } catch(e){}
+  } else {
+    const canAccess = user.isAdmin || task.assigneeId === user.id || (task.assigneeId === null && task.createdById === user.id);
+    if (!canAccess) {
+      try { await ctx.answerCallbackQuery("Нет доступа"); } catch(e){}
+      return;
+    }
+
+    const newStatus = task.status === "DONE" ? "TODO" : "DONE";
+    await prisma.task.update({ where: { id: taskId }, data: { status: newStatus } });
+    try { await ctx.answerCallbackQuery(newStatus === "DONE" ? "✅ Выполнено" : "↩️ Вернул в работу"); } catch(e){}
+  }
+
+  // Перерисовка списка
+  const inlineKeyboard = ctx.callbackQuery.message?.reply_markup?.inline_keyboard || [];
+  const taskIds = inlineKeyboard
+    .map(row => row[0]?.callback_data)
+    .filter(data => data && data.startsWith("tt_"))
+    .map(data => data!.replace("tt_", ""));
+
+  if (taskIds.length === 0) return;
+
+  const tasks = await prisma.task.findMany({ 
+    where: { id: { in: taskIds } }, 
+    include: { project: true } 
+  });
+
+  const sortedTasks = taskIds.map(id => tasks.find(t => t.id === id)).filter(Boolean);
+  
+  if (sortedTasks.length === 0) {
+    try { await ctx.editMessageText("Список пуст"); } catch(e){}
+    return;
+  }
+
+  const origText = ctx.callbackQuery.message?.text || "";
+  const firstLine = origText.split('\n')[0];
+  const isContinuation = firstLine.includes("(продолжение)");
+  
+  const firstTask = sortedTasks[0];
+  const pName = firstTask.project?.name ?? "Без проекта";
+  
+  const openCount = await prisma.task.count({
+    where: {
+      projectId: firstTask.projectId,
+      status: { not: "DONE" },
+      OR: [{ assigneeId: user.id }, { assigneeId: null, createdById: user.id }]
+    }
+  });
+
+  const { text, keyboard } = renderTaskList(sortedTasks, pName, openCount, isContinuation);
+
+  try {
+    await ctx.editMessageText(text, { reply_markup: keyboard });
+  } catch (e) {
+    // Игнорируем ошибку "message is not modified"
+  }
+});
+
+// === НОВЫЙ ОБРАБОТЧИК: УДАЛЕНИЕ С ПОДТВЕРЖДЕНИЕМ ===
 bot.callbackQuery(/^delete_task_(.+)$/, async (ctx) => {
   const id = ctx.match[1];
+  try { await ctx.answerCallbackQuery(); } catch (e) {}
+  
+  const task = await prisma.task.findUnique({ where: { id } });
+  if (!task) {
+    try { await ctx.answerCallbackQuery("Задача не найдена"); } catch(e){}
+    return;
+  }
+  
+  const kb = new InlineKeyboard()
+    .text("✅ Да, удалить", `dtc_${id}`)
+    .text("↩️ Нет", `dtn_${id}`);
+    
+  await ctx.reply(`Удалить задачу «${task.title}»?`, { reply_markup: kb });
+});
+
+bot.callbackQuery(/^dtc_(.+)$/, async (ctx) => {
+  const id = ctx.match[1];
+  const user = await prisma.user.findUnique({ where: { telegramId: ctx.from?.id } });
+  if (!user) return;
+
+  const task = await prisma.task.findUnique({ where: { id } });
+  if (!task) {
+    try { await ctx.answerCallbackQuery("Уже удалена"); } catch(e){}
+    await ctx.deleteMessage().catch(()=>{});
+    return;
+  }
+
+  const canAccess = user.isAdmin || task.assigneeId === user.id || (task.assigneeId === null && task.createdById === user.id);
+  if (!canAccess) {
+    try { await ctx.answerCallbackQuery("Нет доступа"); } catch(e){}
+    return;
+  }
+
   try {
     await prisma.task.delete({ where: { id } });
-    try { await ctx.answerCallbackQuery("Задача удалена"); } catch (e) {}
-    await ctx.deleteMessage(); 
-  } catch (error) { try { await ctx.answerCallbackQuery({ text: "Ошибка удаления", show_alert: true }); } catch (e) {} }
+    try { await ctx.answerCallbackQuery("Задача удалена"); } catch(e){}
+    await ctx.deleteMessage().catch(()=>{});
+  } catch (e) {
+    try { await ctx.answerCallbackQuery("Ошибка удаления"); } catch(err){}
+  }
+});
+
+bot.callbackQuery(/^dtn_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery("Отменено"); } catch(e){}
+  await ctx.deleteMessage().catch(()=>{});
 });
 
 bot.callbackQuery(/^edit_task_(.+)$/, async (ctx) => {
@@ -349,9 +521,7 @@ bot.callbackQuery("intent_no", async (ctx) => {
 
 async function handleIncomingText(ctx: MyContext, userText: string) {
   ctx.session.intentText = userText; 
-
   try {
-    const { GoogleGenerativeAI } = require("@google/generative-ai");
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
     const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
@@ -382,10 +552,8 @@ async function handleIncomingText(ctx: MyContext, userText: string) {
           if (matches.length === 1) matchedProject = matches[0];
         }
       }
-
       ctx.session.prefillTitle = parsedData.taskTitle;
       const kb = new InlineKeyboard().text("✅ Да, создать", "intent_yes_NEW_TASK_PREFILLED").text("✏️ Не так", "intent_no");
-
       if (matchedProject) {
         ctx.session.prefillProjectId = matchedProject.id;
         await ctx.reply(`Правильно понял: создать задачу «${parsedData.taskTitle}» в проекте «${matchedProject.name}»?`, { reply_markup: kb });
@@ -436,8 +604,13 @@ bot.on("message:voice", async (ctx) => {
     const audioBuffer = Buffer.from(await audioResp.arrayBuffer());
     const audioBase64 = audioBuffer.toString("base64");
 
-    const { transcribeAudio } = require("@standup/shared");
-    const transcript = await transcribeAudio(audioBase64);
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+    const result = await model.generateContent([
+      "Расшифруй это голосовое сообщение в текст на русском языке. Верни ТОЛЬКО расшифрованный текст, без пояснений и кавычек.",
+      { inlineData: { data: audioBase64, mimeType: "audio/ogg" } }
+    ]);
+    const transcript = result.response.text().trim();
 
     await ctx.api.deleteMessage(ctx.chat!.id, msgInfo.message_id).catch(() => {});
 
